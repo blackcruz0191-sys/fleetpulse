@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FleetPulse - Centro de Control y Seguimiento de Flotas</title>
+  
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- App Stylesheet -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-theme">
+
+  <!-- Auth Gate: Login / Register Overlay (shown until a valid session token exists) -->
+  <div class="auth-overlay" id="auth-overlay">
+    <div class="auth-card">
+      <div class="brand" style="justify-content: center; margin-bottom: 8px;">
+        <div class="brand-logo">
+          <i class="fa-solid fa-satellite-dish pulse-icon"></i>
+        </div>
+        <div class="brand-text">
+          <h1>FleetPulse</h1>
+          <p class="subtitle">Centro de Control de Flotas</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" type="button">Iniciar Sesión</button>
+        <button class="auth-tab" id="tab-register" type="button">Crear Cuenta Gratis</button>
+      </div>
+
+      <p class="auth-note" id="auth-slots-note"></p>
+
+      <!-- Login Form -->
+      <form id="login-form" class="auth-form">
+        <div class="form-group">
+          <label for="login-username">Usuario</label>
+          <input type="text" id="login-username" required autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Contraseña</label>
+          <input type="password" id="login-password" required autocomplete="current-password" />
+        </div>
+        <p class="auth-error" id="login-error"></p>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+          <i class="fa-solid fa-right-to-bracket"></i> Ingresar
+        </button>
+      </form>
+
+      <!-- Register Form -->
+      <form id="register-form" class="auth-form" style="display: none;">
+        <div class="form-group">
+          <label for="register-company">Nombre de Empresa / Flota</label>
+          <input type="text" id="register-company" required />
+        </div>
+        <div class="form-group">
+          <label for="register-username">Usuario</label>
+          <input type="text" id="register-username" required autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label for="register-password">Contraseña (mín. 6 caracteres)</label>
+          <input type="password" id="register-password" required minlength="6" autocomplete="new-password" />
+        </div>
+        <p class="auth-error" id="register-error"></p>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+          <i class="fa-solid fa-user-plus"></i> Crear Cuenta y Empezar a Monitorear
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Top App Navigation Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-logo">
+        <i class="fa-solid fa-satellite-dish pulse-icon"></i>
+      </div>
+      <div class="brand-text">
+        <h1>FleetPulse <span class="badge live">EN VIVO</span></h1>
+        <p class="subtitle">Centro de Control de Flotas y Telemetría GPS</p>
+      </div>
+    </div>
+
+    <!-- Live Fleet Status Counters -->
+    <div class="header-metrics">
+      <div class="metric-chip active">
+        <div class="metric-icon"><i class="fa-solid fa-truck-fast"></i></div>
+        <div class="metric-data">
+          <span class="metric-value" id="count-active">0</span>
+          <span class="metric-label">En Ruta</span>
+        </div>
+      </div>
+
+      <div class="metric-chip idle">
+        <div class="metric-icon"><i class="fa-solid fa-pause-circle"></i></div>
+        <div class="metric-data">
+          <span class="metric-value" id="count-idle">0</span>
+          <span class="metric-label">Detenidos</span>
+        </div>
+      </div>
+
+      <div class="metric-chip alert">
+        <div class="metric-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="metric-data">
+          <span class="metric-value" id="count-alert">0</span>
+          <span class="metric-label">Alertas</span>
+        </div>
+      </div>
+
+      <div class="metric-chip offline">
+        <div class="metric-icon"><i class="fa-solid fa-power-off"></i></div>
+        <div class="metric-data">
+          <span class="metric-value" id="count-offline">0</span>
+          <span class="metric-label">Desconectados</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header Actions & Simulation Control -->
+    <div class="header-actions">
+      <div class="sim-control-box" style="display: none;">
+        <span class="sim-label"><i class="fa-solid fa-play"></i> Simulación GPS:</span>
+        <button id="btn-toggle-sim" class="btn btn-primary btn-sm">
+          <i class="fa-solid fa-pause"></i> <span id="sim-status-text">Pausar</span>
+        </button>
+        <select id="sim-speed-select" class="select-sm">
+          <option value="1">Velocidad 1x</option>
+          <option value="2" selected>Velocidad 2x</option>
+          <option value="5">Velocidad 5x</option>
+        </select>
+      </div>
+
+      <button id="btn-add-geofence" class="btn btn-outline btn-sm">
+        <i class="fa-solid fa-draw-polygon"></i> Nueva Geocerca
+      </button>
+
+      <button id="btn-open-alerts-log" class="btn btn-outline btn-sm" style="position: relative;">
+        <i class="fa-solid fa-bell"></i> Alertas
+        <span id="alerts-badge" style="display:none; position:absolute; top:-6px; right:-6px; background:var(--color-alert); color:white; border-radius:50%; width:18px; height:18px; font-size:0.65rem; align-items:center; justify-content:center;"></span>
+      </button>
+
+      <div class="user-chip" id="user-chip">
+        <i class="fa-solid fa-circle-user"></i>
+        <span id="user-chip-name">—</span>
+        <button id="btn-logout" class="btn-logout" title="Cerrar Sesión">
+          <i class="fa-solid fa-right-from-bracket"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main App Content Area (Sidebar + Map Container) -->
+  <main class="app-layout">
+    
+    <!-- Left Fleet Navigation Sidebar -->
+    <aside class="sidebar" id="fleet-sidebar">
+      
+      <!-- Search & Filters Header -->
+      <div class="sidebar-header">
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" id="vehicle-search" placeholder="Buscar vehículo, chofer o placa..." />
+          <button id="btn-clear-search" class="clear-btn" style="display: none;"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-filter="all">Todos (<span id="total-count">0</span>)</button>
+          <button class="filter-tab" data-filter="active">En Ruta</button>
+          <button class="filter-tab" data-filter="idle">En Espera</button>
+          <button class="filter-tab" data-filter="alert">Alertas</button>
+        </div>
+      </div>
+
+      <!-- Vehicle Card List -->
+      <div class="vehicle-list" id="vehicle-list-container">
+        <!-- Rendered dynamically by components.js -->
+      </div>
+
+      <!-- Fleet Summary Footer -->
+      <div class="sidebar-footer">
+        <div class="fleet-stat">
+          <span class="stat-title"><i class="fa-solid fa-gauge-high"></i> Vel. Promedio</span>
+          <span class="stat-val" id="avg-speed">0 km/h</span>
+        </div>
+        <div class="fleet-stat">
+          <span class="stat-title"><i class="fa-solid fa-gas-pump"></i> Combustible Prom.</span>
+          <span class="stat-val" id="avg-fuel">0%</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Map Viewport Container -->
+    <section class="map-container">
+      
+      <!-- Leaflet Map Canvas -->
+      <div id="map"></div>
+
+      <!-- Floating Map Toolbar Overlay -->
+      <div class="map-overlay-controls">
+        <button class="map-tool-btn" id="btn-center-fleet" title="Centrar Flota en Mapa">
+          <i class="fa-solid fa-crosshairs"></i>
+        </button>
+        <button class="map-tool-btn active" id="btn-toggle-trails" title="Mostrar/Ocultar Rutas Recorridas">
+          <i class="fa-solid fa-route"></i>
+        </button>
+        <button class="map-tool-btn active" id="btn-toggle-geofences" title="Mostrar/Ocultar Geocercas">
+          <i class="fa-solid fa-draw-polygon"></i>
+        </button>
+      </div>
+
+      <!-- Live Event Toast Feed Overlay -->
+      <div class="alerts-feed" id="alerts-feed">
+        <!-- Dynamic alert toasts arrive here -->
+      </div>
+
+      <!-- Route Assignment Panel (shown while picking stops on the map) -->
+      <div class="route-panel" id="route-panel" style="display: none;">
+        <h4>Asignar Ruta</h4>
+        <p>Haz clic en el mapa para agregar paradas en orden.</p>
+        <div id="route-stops-list"></div>
+        <div style="display: flex; gap: 8px; margin-top: 10px;">
+          <button class="btn btn-outline btn-sm" id="btn-cancel-route" style="flex: 1;">Cancelar</button>
+          <button class="btn btn-primary btn-sm" id="btn-save-route" style="flex: 1;">Guardar Ruta</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Vehicle Detail Panel / Drawer -->
+    <aside class="detail-drawer" id="detail-drawer">
+      <button class="close-drawer-btn" id="btn-close-drawer">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div class="drawer-content" id="drawer-content">
+        <!-- Populated dynamically when selecting a vehicle -->
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Alerts Log Modal -->
+  <div class="modal-overlay" id="alerts-log-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-bell"></i> Historial de Alertas</h3>
+        <button class="modal-close" id="btn-close-alerts-log"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="alerts-log-list">
+          <p style="color: var(--text-muted); font-size: 0.85rem;">Cargando alertas...</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-close-alerts-log-2">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Digital Document Modal -->
+  <div class="modal-overlay" id="document-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-file-invoice"></i> Emitir Documento Digital</h3>
+        <button class="modal-close" id="btn-close-document-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <form id="document-form">
+          <div class="form-group">
+            <label for="doc-type">Tipo de Documento</label>
+            <select id="doc-type">
+              <option value="FACTURA">Factura</option>
+              <option value="BOLETA">Boleta</option>
+              <option value="GUIA_REMISION" selected>Guía de Remisión</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="doc-number">N° de Documento (opcional)</label>
+            <input type="text" id="doc-number" />
+          </div>
+          <div class="form-group">
+            <label for="doc-client-name">Nombre del Cliente</label>
+            <input type="text" id="doc-client-name" required />
+          </div>
+          <div class="form-group">
+            <label for="doc-client-ruc">RUC / DNI del Cliente</label>
+            <input type="text" id="doc-client-ruc" />
+          </div>
+          <div class="form-group">
+            <label for="doc-address">Dirección de Entrega</label>
+            <input type="text" id="doc-address" required />
+          </div>
+          <div class="form-group">
+            <label for="doc-items">Resumen de Bultos / Productos</label>
+            <input type="text" id="doc-items" />
+          </div>
+          <div class="form-group">
+            <label for="doc-amount">Monto Total (S/) - opcional</label>
+            <input type="number" id="doc-amount" min="0" step="0.01" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-document">Cancelar</button>
+        <button class="btn btn-primary" id="btn-save-document">Emitir Documento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Driver & Vehicle Profile Modal (incl. Brevete / License) -->
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-id-card"></i> Perfil de Chofer y Vehículo</h3>
+        <button class="modal-close" id="btn-close-profile-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <form id="profile-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-driver-name">Nombre del Chofer</label>
+              <input type="text" id="prof-driver-name" required />
+            </div>
+            <div class="form-group">
+              <label for="prof-driver-phone">Teléfono</label>
+              <input type="text" id="prof-driver-phone" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-vehicle-model">Modelo del Vehículo</label>
+              <input type="text" id="prof-vehicle-model" required />
+            </div>
+            <div class="form-group">
+              <label for="prof-plate">Placa</label>
+              <input type="text" id="prof-plate" required />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-cargo-type">Tipo de Carga</label>
+              <input type="text" id="prof-cargo-type" />
+            </div>
+            <div class="form-group">
+              <label for="prof-cargo-weight">Peso de Carga (kg)</label>
+              <input type="number" id="prof-cargo-weight" min="0" />
+            </div>
+          </div>
+
+          <h4 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin: 16px 0 8px;">Brevete (Licencia de Conducir)</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-license-number">N° de Brevete</label>
+              <input type="text" id="prof-license-number" />
+            </div>
+            <div class="form-group">
+              <label for="prof-license-category">Categoría</label>
+              <select id="prof-license-category">
+                <option value="">—</option>
+                <option>A-I</option><option>A-IIa</option><option>A-IIb</option><option>A-IIIa</option>
+                <option>A-IIIb</option><option>A-IIIc</option><option>B-I</option><option>B-IIa</option><option>B-IIb</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="prof-license-issue">Fecha de Emisión</label>
+              <input type="date" id="prof-license-issue" />
+            </div>
+            <div class="form-group">
+              <label for="prof-license-expiry">Fecha de Vencimiento</label>
+              <input type="date" id="prof-license-expiry" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="prof-license-restrictions">Restricciones</label>
+            <input type="text" id="prof-license-restrictions" placeholder="Ej: Uso de lentes obligatorio" />
+          </div>
+          <div class="form-group">
+            <label for="prof-license-infractions">Record de Infracciones</label>
+            <input type="text" id="prof-license-infractions" placeholder="Ej: Sin infracciones registradas" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-profile">Cancelar</button>
+        <button class="btn btn-primary" id="btn-save-profile">Guardar Perfil</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Geofence Modal -->
+  <div class="modal-overlay" id="geofence-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-draw-polygon"></i> Crear Nueva Geocerca</h3>
+        <button class="modal-close" id="btn-close-geofence-modal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <form id="geofence-form">
+          <div class="form-group">
+            <label for="geo-name">Nombre de la Zona / Parada</label>
+            <input type="text" id="geo-name" placeholder="Ej: Centro de Distribución Norte" required />
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="geo-type">Tipo de Zona</label>
+              <select id="geo-type">
+                <option value="depot">Almacén / Depósito</option>
+                <option value="client">Cliente / Entrega</option>
+                <option value="restricted">Zona Restringida</option>
+                <option value="checkpoint">Punto de Control</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="geo-radius">Radio de Alerta (metros)</label>
+              <input type="number" id="geo-radius" value="300" min="50" max="2000" step="50" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Acción de Alerta</label>
+            <div class="checkbox-group">
+              <label><input type="checkbox" id="geo-alert-entry" checked /> Notificar al ingresar</label>
+              <label><input type="checkbox" id="geo-alert-exit" checked /> Notificar al salir</label>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-geofence">Cancelar</button>
+        <button class="btn btn-primary" id="btn-save-geofence">Guardar y Activar Zona</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Socket.io Client for Real-time Server Sync -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+  <!-- App JS Modules -->
+  <script src="js/auth.js?v=lima7"></script>
+  <script src="js/data.js?v=lima7"></script>
+  <script src="js/simulator.js?v=lima7"></script>
+  <script src="js/map.js?v=lima7"></script>
+  <script src="js/components.js?v=lima7"></script>
+  <script src="js/app.js?v=lima7"></script>
+</body>
+</html>

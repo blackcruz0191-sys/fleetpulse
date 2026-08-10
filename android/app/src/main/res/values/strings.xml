@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FleetPulse Chofer</string>
+    <string name="safety_reminder_title">Tu familia te espera</string>
+    <string name="safety_reminder_message">Llega a casa seguro. Maneja con precaución y descansa si lo necesitas.</string>
+    <string name="safety_reminder_button">ENTENDIDO, VOLVER A RUTA</string>
+</resources>

@@ -1,0 +1,21 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Server runtime data (never commit real user data or uploaded files)
+server/data/
+server/uploads/
+.env
+
+# Android
+**/.gradle/
+**/build/
+**/local.properties
+**/*.hprof
+**/.idea/
+**/.artifacts/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
