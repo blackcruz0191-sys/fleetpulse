@@ -59,6 +59,7 @@ function toClientVehicle(row) {
   return {
     id: row.id,
     ownerUserId: row.owner_user_id,
+    driverUserId: row.driver_user_id,
     plate: row.plate,
     name: row.name,
     type: row.type,
@@ -116,8 +117,8 @@ function asyncRoute(handler) {
 // ============================================================
 
 app.post('/api/v1/auth/register', asyncRoute(async (req, res) => {
-  const { username, password, company_name } = req.body;
-  const result = await auth.register({ username, password, companyName: company_name });
+  const { username, password, company_name, role } = req.body;
+  const result = await auth.register({ username, password, companyName: company_name, role });
 
   if (result.error) {
     return res.status(result.status).json({ success: false, message: result.error });
@@ -140,7 +141,10 @@ app.post('/api/v1/auth/login', asyncRoute(async (req, res) => {
 app.get('/api/v1/auth/me', auth.authMiddleware, asyncRoute(async (req, res) => {
   const user = await db.findUserById(req.userId);
   if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
-  res.json({ success: true, user: { id: user.id, username: user.username, companyName: user.company_name } });
+  res.json({
+    success: true,
+    user: { id: user.id, username: user.username, companyName: user.company_name, role: user.role, driverCode: user.driver_code }
+  });
 }));
 
 // Every route below requires a valid "Authorization: Bearer <token>" header.
@@ -151,15 +155,21 @@ app.use('/api/v1/vehicles', auth.authMiddleware);
 app.use('/api/v1/routes', auth.authMiddleware);
 app.use('/api/v1/alerts', auth.authMiddleware);
 app.use('/api/v1/upload', auth.authMiddleware);
+app.use('/api/v1/fleet', auth.authMiddleware);
 
-// Confirms the authenticated user owns vehicleId, auto-registering it under their
-// account on first contact (e.g. the very first GPS ping before a profile exists).
-async function assertOwnership(vehicleId, ownerUserId) {
+// Confirms the authenticated user can act on vehicleId — either as its fleet owner (admin)
+// or as its linked driver account (still works after an admin claims the vehicle into their
+// fleet). Returns the vehicle's real owner_user_id to notify (may differ from the requester,
+// e.g. a driver posting GPS for a vehicle an admin already claimed), or `undefined` if the
+// vehicle doesn't exist yet (first contact — the requester becomes its owner), or `null` if
+// access is denied.
+async function resolveVehicleOwner(vehicleId, requestingUserId) {
   const existing = await db.getVehicle(vehicleId);
-  if (existing && existing.owner_user_id !== ownerUserId) {
-    return false;
+  if (!existing) return undefined;
+  if (existing.owner_user_id !== requestingUserId && existing.driver_user_id !== requestingUserId) {
+    return null;
   }
-  return true;
+  return existing.owner_user_id;
 }
 
 // 1. Endpoint REST POST API - Recibe la ubicación enviada por la App Android
@@ -170,15 +180,17 @@ app.post('/api/v1/telemetry/location', asyncRoute(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Datos incompletos' });
   }
 
-  if (!(await assertOwnership(vehicle_id, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(vehicle_id, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
+  const ownerUserId = resolvedOwner ?? req.userId;
 
   const speed = parseFloat(speed_kmh || 0);
 
   const row = await db.upsertVehicle({
     id: vehicle_id,
-    owner_user_id: req.userId,
+    owner_user_id: ownerUserId,
     plate: plate || null,
     driver_name: driver_name || null,
     cargo_type: cargo_info || null,
@@ -195,16 +207,17 @@ app.post('/api/v1/telemetry/location', asyncRoute(async (req, res) => {
   const vehicle = toClientVehicle(row);
   fleetState.set(vehicle_id, vehicle);
 
-  console.log(`[GPS API Recibido] Vehículo: ${vehicle_id} (user ${req.userId}) | Lat: ${latitude}, Lng: ${longitude} | Vel: ${speed} km/h`);
+  console.log(`[GPS API Recibido] Vehículo: ${vehicle_id} (chofer ${req.userId} -> flota ${ownerUserId}) | Lat: ${latitude}, Lng: ${longitude} | Vel: ${speed} km/h`);
 
-  emitToOwner(req.userId, 'location_update', vehicle);
+  emitToOwner(ownerUserId, 'location_update', vehicle);
 
   return res.json({ success: true, message: 'Ubicación procesada y retransmitida exitosamente' });
 }));
 
-// 2. Endpoint REST GET API - Obtener la lista de vehículos del usuario autenticado
+// 2. Endpoint REST GET API - Obtener la lista de vehículos accesibles para el usuario
+// (los que administra como flota, más el suyo propio si es un chofer ya reclamado por otra flota)
 app.get('/api/v1/vehicles', asyncRoute(async (req, res) => {
-  const rows = await db.getVehiclesByOwner(req.userId);
+  const rows = await db.getVehiclesAccessibleByUser(req.userId);
   res.json(rows.map(toClientVehicle));
 }));
 
@@ -220,13 +233,15 @@ app.post('/api/v1/driver/profile', asyncRoute(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Datos de perfil incompletos' });
   }
 
-  if (!(await assertOwnership(vehicle_id, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(vehicle_id, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
+  const ownerUserId = resolvedOwner ?? req.userId;
 
   const row = await db.upsertVehicle({
     id: vehicle_id,
-    owner_user_id: req.userId,
+    owner_user_id: ownerUserId,
     plate,
     name: vehicle_model || null,
     vehicle_model,
@@ -246,9 +261,9 @@ app.post('/api/v1/driver/profile', asyncRoute(async (req, res) => {
   const vehicle = toClientVehicle(row);
   fleetState.set(vehicle_id, vehicle);
 
-  console.log(`[Perfil Actualizado] Vehículo: ${vehicle_id} (user ${req.userId}) | Chofer: ${driver_name} | Placa: ${plate}`);
+  console.log(`[Perfil Actualizado] Vehículo: ${vehicle_id} (flota ${ownerUserId}) | Chofer: ${driver_name} | Placa: ${plate}`);
 
-  emitToOwner(req.userId, 'profile_update', vehicle);
+  emitToOwner(ownerUserId, 'profile_update', vehicle);
 
   return res.json({ success: true, message: 'Perfil de chofer y vehículo registrado exitosamente' });
 }));
@@ -261,14 +276,16 @@ app.post('/api/v1/documents', asyncRoute(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Datos del documento incompletos' });
   }
 
-  if (!(await assertOwnership(vehicle_id, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(vehicle_id, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
+  const ownerUserId = resolvedOwner ?? req.userId;
 
   const document = {
     id: id || `DOC-${Date.now().toString().slice(-6)}`,
     vehicle_id,
-    owner_user_id: req.userId,
+    owner_user_id: ownerUserId,
     doc_type,
     doc_number: doc_number || '',
     client_name,
@@ -282,9 +299,9 @@ app.post('/api/v1/documents', asyncRoute(async (req, res) => {
 
   await db.insertDocument(document);
 
-  console.log(`[Documento Emitido] Vehículo: ${vehicle_id} (user ${req.userId}) | Tipo: ${doc_type} | Cliente: ${client_name}`);
+  console.log(`[Documento Emitido] Vehículo: ${vehicle_id} (flota ${ownerUserId}) | Tipo: ${doc_type} | Cliente: ${client_name}`);
 
-  emitToOwner(req.userId, 'document_created', {
+  emitToOwner(ownerUserId, 'document_created', {
     id: document.id,
     vehicleId: document.vehicle_id,
     docType: document.doc_type,
@@ -301,9 +318,10 @@ app.post('/api/v1/documents', asyncRoute(async (req, res) => {
   return res.json({ success: true, message: 'Documento digital registrado exitosamente' });
 }));
 
-// 5. Endpoint REST GET API - Obtener documentos digitales de un vehículo (solo si es dueño)
+// 5. Endpoint REST GET API - Obtener documentos digitales de un vehículo (solo si es dueño o chofer)
 app.get('/api/v1/documents/:vehicleId', asyncRoute(async (req, res) => {
-  if (!(await assertOwnership(req.params.vehicleId, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(req.params.vehicleId, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
 
@@ -333,27 +351,30 @@ app.post('/api/v1/routes', asyncRoute(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Se requiere vehicle_id y al menos una parada' });
   }
 
-  if (!(await assertOwnership(vehicle_id, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(vehicle_id, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
+  const ownerUserId = resolvedOwner ?? req.userId;
 
   const route = await db.setActiveRoute({
     id: `RT-${Date.now().toString().slice(-8)}`,
     vehicleId: vehicle_id,
-    ownerUserId: req.userId,
+    ownerUserId,
     stops
   });
 
-  console.log(`[Ruta Asignada] Vehículo: ${vehicle_id} (user ${req.userId}) | ${stops.length} parada(s)`);
+  console.log(`[Ruta Asignada] Vehículo: ${vehicle_id} (flota ${ownerUserId}) | ${stops.length} parada(s)`);
 
-  emitToOwner(req.userId, 'route_updated', route);
+  emitToOwner(ownerUserId, 'route_updated', route);
 
   return res.json({ success: true, message: 'Ruta asignada exitosamente', route });
 }));
 
 // 7. Endpoint REST GET API - Obtener la ruta activa de un vehículo
 app.get('/api/v1/routes/:vehicleId', asyncRoute(async (req, res) => {
-  if (!(await assertOwnership(req.params.vehicleId, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(req.params.vehicleId, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
 
@@ -372,14 +393,16 @@ app.post('/api/v1/alerts', asyncRoute(async (req, res) => {
     return res.status(400).json({ success: false, message: `Tipo de alerta inválido. Use: ${VALID_ALERT_TYPES.join(', ')}` });
   }
 
-  if (!(await assertOwnership(vehicle_id, req.userId))) {
+  const resolvedOwner = await resolveVehicleOwner(vehicle_id, req.userId);
+  if (resolvedOwner === null) {
     return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
   }
+  const ownerUserId = resolvedOwner ?? req.userId;
 
   const alert = await db.insertAlert({
     id: `ALT-${Date.now().toString().slice(-8)}`,
     vehicle_id,
-    owner_user_id: req.userId,
+    owner_user_id: ownerUserId,
     type,
     message: message || null,
     lat: lat !== undefined ? parseFloat(lat) : null,
@@ -389,13 +412,13 @@ app.post('/api/v1/alerts', asyncRoute(async (req, res) => {
 
   // A breakdown or emergency should surface as an alert-status vehicle on the dashboard.
   if (type === 'EMERGENCY' || type === 'BREAKDOWN') {
-    const row = await db.upsertVehicle({ id: vehicle_id, owner_user_id: req.userId, status: 'alert' });
-    emitToOwner(req.userId, 'location_update', toClientVehicle(row));
+    const row = await db.upsertVehicle({ id: vehicle_id, owner_user_id: ownerUserId, status: 'alert' });
+    emitToOwner(ownerUserId, 'location_update', toClientVehicle(row));
   }
 
-  console.log(`[Alerta] Vehículo: ${vehicle_id} (user ${req.userId}) | Tipo: ${type}`);
+  console.log(`[Alerta] Vehículo: ${vehicle_id} (flota ${ownerUserId}) | Tipo: ${type}`);
 
-  emitToOwner(req.userId, 'alert_created', {
+  emitToOwner(ownerUserId, 'alert_created', {
     id: alert.id,
     vehicleId: alert.vehicle_id,
     type: alert.type,
@@ -449,6 +472,38 @@ app.post('/api/v1/upload/license-photo', (req, res) => {
   });
 });
 
+// 12. Endpoint REST POST API - Reclamar un chofer registrado independientemente hacia la
+// flota del administrador autenticado, usando el código único de 6 caracteres del chofer.
+app.post('/api/v1/fleet/claim-driver', asyncRoute(async (req, res) => {
+  const { driver_code } = req.body;
+  if (!driver_code) {
+    return res.status(400).json({ success: false, message: 'Se requiere el código del chofer' });
+  }
+
+  const driverUser = await db.findUserByDriverCode(String(driver_code).toUpperCase().trim());
+  if (!driverUser || driverUser.role !== 'driver') {
+    return res.status(404).json({ success: false, message: 'Código de chofer inválido' });
+  }
+  if (driverUser.id === req.userId) {
+    return res.status(400).json({ success: false, message: 'No puedes agregarte a ti mismo' });
+  }
+
+  const claimedRows = await db.claimDriverVehicles(driverUser.id, req.userId);
+  if (claimedRows.length === 0) {
+    return res.status(409).json({ success: false, message: 'Ese chofer no tiene vehículos disponibles (puede que ya esté en otra flota)' });
+  }
+
+  const claimedVehicles = claimedRows.map(toClientVehicle);
+  claimedVehicles.forEach(v => {
+    fleetState.set(v.id, v);
+    emitToOwner(req.userId, 'profile_update', v);
+  });
+
+  console.log(`[Chofer Agregado] ${driverUser.username} (código ${driver_code}) -> flota ${req.userId} | ${claimedVehicles.length} vehículo(s)`);
+
+  return res.json({ success: true, message: 'Chofer agregado a tu flota exitosamente', vehicles: claimedVehicles });
+}));
+
 // Simple health check for uptime monitors / deployment platforms.
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -470,7 +525,7 @@ io.on('connection', (socket) => {
 
   socket.join(`user:${socket.userId}`);
 
-  db.getVehiclesByOwner(socket.userId)
+  db.getVehiclesAccessibleByUser(socket.userId)
     .then(rows => socket.emit('initial_fleet', rows.map(toClientVehicle)))
     .catch(err => console.error('[WebSocket] Error cargando flota inicial:', err));
 

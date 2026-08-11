@@ -60,9 +60,19 @@
       <!-- Register Form -->
       <form id="register-form" class="auth-form" style="display: none;">
         <div class="form-group">
+          <label>Me estoy registrando como</label>
+          <div class="auth-tabs" style="margin-bottom: 0;">
+            <button type="button" class="auth-tab active" id="role-admin-btn" data-role="admin">Administrador de Flota</button>
+            <button type="button" class="auth-tab" id="role-driver-btn" data-role="driver">Chofer</button>
+          </div>
+        </div>
+        <div class="form-group" id="register-company-group">
           <label for="register-company">Nombre de Empresa / Flota</label>
           <input type="text" id="register-company" required />
         </div>
+        <p class="auth-note" id="register-driver-note" style="display: none; text-align: left;">
+          Recibirás un código único para que tu administrador de flota te agregue a su flota.
+        </p>
         <div class="form-group">
           <label for="register-username">Usuario</label>
           <input type="text" id="register-username" required autocomplete="username" />
@@ -144,6 +154,10 @@
         <i class="fa-solid fa-truck-fast"></i> Nuevo Vehículo
       </button>
 
+      <button id="btn-add-driver" class="btn btn-outline btn-sm">
+        <i class="fa-solid fa-user-plus"></i> Agregar Chofer
+      </button>
+
       <button id="btn-add-geofence" class="btn btn-outline btn-sm">
         <i class="fa-solid fa-draw-polygon"></i> Nueva Geocerca
       </button>
@@ -162,6 +176,11 @@
       </div>
     </div>
   </header>
+
+  <!-- Shown only when the logged-in account is a driver, not a fleet admin -->
+  <div id="driver-code-banner" style="display: none; background: var(--accent-gradient); color: white; padding: 8px 24px; font-size: 0.85rem; text-align: center;">
+    Tu código de chofer es <strong id="driver-code-banner-value" style="font-family: var(--font-mono); letter-spacing: 0.1em;"></strong> — compártelo con tu administrador de flota para que te agregue.
+  </div>
 
   <!-- Main App Content Area (Sidebar + Map Container) -->
   <main class="app-layout">
@@ -251,6 +270,30 @@
     </aside>
 
   </main>
+
+  <!-- Add Driver to Fleet Modal -->
+  <div class="modal-overlay" id="add-driver-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-user-plus"></i> Agregar Chofer a mi Flota</h3>
+        <button class="modal-close" id="btn-close-add-driver"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;">
+          Pídele a tu chofer su código único de 6 caracteres (lo recibió al registrarse en la app como "Chofer").
+        </p>
+        <div class="form-group">
+          <label for="add-driver-code">Código del Chofer</label>
+          <input type="text" id="add-driver-code" placeholder="Ej. Y6NJF7" maxlength="6" style="text-transform: uppercase; letter-spacing: 0.15em; font-family: var(--font-mono); text-align: center; font-size: 1.1rem;" />
+        </div>
+        <p class="auth-error" id="add-driver-error"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-add-driver">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirm-add-driver">Agregar a mi Flota</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Alerts Log Modal -->
   <div class="modal-overlay" id="alerts-log-modal">
@@ -459,11 +502,11 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
   <!-- App JS Modules -->
-  <script src="js/auth.js?v=prod2"></script>
-  <script src="js/data.js?v=prod2"></script>
-  <script src="js/simulator.js?v=prod2"></script>
-  <script src="js/map.js?v=prod2"></script>
-  <script src="js/components.js?v=prod2"></script>
-  <script src="js/app.js?v=prod2"></script>
+  <script src="js/auth.js?v=prod3"></script>
+  <script src="js/data.js?v=prod3"></script>
+  <script src="js/simulator.js?v=prod3"></script>
+  <script src="js/map.js?v=prod3"></script>
+  <script src="js/components.js?v=prod3"></script>
+  <script src="js/app.js?v=prod3"></script>
 </body>
 </html>

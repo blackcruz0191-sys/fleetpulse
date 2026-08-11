@@ -12,7 +12,17 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.fleetpulse.driver.data.ProfileStore
@@ -47,6 +57,7 @@ class MainActivity : ComponentActivity() {
     private var isAuthenticated by mutableStateOf(false)
     private var isAuthLoading by mutableStateOf(false)
     private var authError by mutableStateOf<String?>(null)
+    private var driverCodeToShow by mutableStateOf<String?>(null)
 
     private lateinit var profileStore: ProfileStore
     private var driverProfile by mutableStateOf<DriverProfile?>(null)
@@ -97,7 +108,7 @@ class MainActivity : ComponentActivity() {
                         isLoading = isAuthLoading,
                         errorMessage = authError,
                         onLogin = { username, password -> login(username, password) },
-                        onRegister = { username, password, companyName -> register(username, password, companyName) }
+                        onRegister = { username, password, companyName, role -> register(username, password, companyName, role) }
                     )
                 } else if (driverProfile == null || showProfileScreen) {
                     DriverProfileScreen(
@@ -134,6 +145,7 @@ class MainActivity : ComponentActivity() {
                         currentLongitude = currentLng,
                         currentSpeedKmh = currentSpeed,
                         assignedRoute = assignedRoute,
+                        driverCode = SessionManager.driverCode,
                         onToggleDuty = { enabled ->
                             if (enabled) {
                                 checkAndRequestPermissions()
@@ -155,6 +167,24 @@ class MainActivity : ComponentActivity() {
                         loadAssignedRoute()
                     }
                 }
+
+                driverCodeToShow?.let { code ->
+                    AlertDialog(
+                        onDismissRequest = { driverCodeToShow = null },
+                        title = { Text("¡Cuenta de Chofer Creada!") },
+                        text = {
+                            Column {
+                                Text("Tu código único es:")
+                                Text(text = code, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Compártelo con tu administrador de flota para que te agregue a su flota. También podrás verlo luego en tu perfil.")
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { driverCodeToShow = null }) { Text("Entendido") }
+                        }
+                    )
+                }
             }
         }
     }
@@ -168,7 +198,7 @@ class MainActivity : ComponentActivity() {
                 val response = apiService.login(LoginRequest(username, password))
                 val body = response.body()
                 if (response.isSuccessful && body?.token != null && body.user != null) {
-                    SessionManager.save(this@MainActivity, body.token, body.user.username, body.user.companyName)
+                    SessionManager.save(this@MainActivity, body.token, body.user.username, body.user.companyName, body.user.role, body.user.driverCode)
                     isAuthenticated = true
                 } else {
                     authError = body?.message ?: "Usuario o contraseña incorrectos"
@@ -181,17 +211,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun register(username: String, password: String, companyName: String) {
+    private fun register(username: String, password: String, companyName: String, role: String) {
         authError = null
         isAuthLoading = true
         lifecycleScope.launch {
             try {
                 val apiService = FleetApiService.create()
-                val response = apiService.register(RegisterRequest(username, password, companyName))
+                val response = apiService.register(RegisterRequest(username, password, companyName, role))
                 val body = response.body()
                 if (response.isSuccessful && body?.token != null && body.user != null) {
-                    SessionManager.save(this@MainActivity, body.token, body.user.username, body.user.companyName)
+                    SessionManager.save(this@MainActivity, body.token, body.user.username, body.user.companyName, body.user.role, body.user.driverCode)
                     isAuthenticated = true
+                    if (body.user.role == "driver" && !body.user.driverCode.isNullOrBlank()) {
+                        driverCodeToShow = body.user.driverCode
+                    }
                 } else {
                     authError = body?.message ?: "No se pudo crear la cuenta"
                 }

@@ -40,11 +40,11 @@ const AuthClient = {
     return data.user;
   },
 
-  async register(username, password, companyName) {
+  async register(username, password, companyName, role = 'admin') {
     const res = await fetch(`${this.API_BASE}/api/v1/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, company_name: companyName })
+      body: JSON.stringify({ username, password, company_name: companyName, role })
     });
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.message || 'No se pudo crear la cuenta');

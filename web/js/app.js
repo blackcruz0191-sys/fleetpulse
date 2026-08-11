@@ -20,6 +20,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const registerError = document.getElementById('register-error');
   const userChipName = document.getElementById('user-chip-name');
   const btnLogout = document.getElementById('btn-logout');
+  const driverCodeBanner = document.getElementById('driver-code-banner');
+  const driverCodeBannerValue = document.getElementById('driver-code-banner-value');
+
+  // Role selector on the register form
+  let selectedRegisterRole = 'admin';
+  const roleAdminBtn = document.getElementById('role-admin-btn');
+  const roleDriverBtn = document.getElementById('role-driver-btn');
+  const registerCompanyGroup = document.getElementById('register-company-group');
+  const registerDriverNote = document.getElementById('register-driver-note');
+  const registerCompanyInput = document.getElementById('register-company');
+
+  roleAdminBtn.addEventListener('click', () => {
+    selectedRegisterRole = 'admin';
+    roleAdminBtn.classList.add('active');
+    roleDriverBtn.classList.remove('active');
+    registerCompanyGroup.style.display = 'flex';
+    registerDriverNote.style.display = 'none';
+    registerCompanyInput.required = true;
+  });
+
+  roleDriverBtn.addEventListener('click', () => {
+    selectedRegisterRole = 'driver';
+    roleDriverBtn.classList.add('active');
+    roleAdminBtn.classList.remove('active');
+    registerCompanyGroup.style.display = 'none';
+    registerDriverNote.style.display = 'block';
+    registerCompanyInput.required = false;
+  });
 
   tabLogin.addEventListener('click', () => {
     tabLogin.classList.add('active');
@@ -58,7 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const user = await AuthClient.register(
         document.getElementById('register-username').value.trim(),
         document.getElementById('register-password').value,
-        document.getElementById('register-company').value.trim()
+        document.getElementById('register-company').value.trim(),
+        selectedRegisterRole
       );
       onAuthenticated(user);
     } catch (err) {
@@ -74,6 +103,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function onAuthenticated(user) {
     authOverlay.classList.add('hidden');
     userChipName.textContent = user.companyName || user.username;
+
+    if (user.role === 'driver' && user.driverCode) {
+      driverCodeBannerValue.textContent = user.driverCode;
+      driverCodeBanner.style.display = 'block';
+    }
+
     initDashboard();
   }
 
@@ -557,6 +592,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('btn-add-vehicle').addEventListener('click', openNewVehicleModal);
+
+    // Add Driver to Fleet modal (claims an independently-registered driver via their code)
+    const addDriverModal = document.getElementById('add-driver-modal');
+    const addDriverCodeInput = document.getElementById('add-driver-code');
+    const addDriverError = document.getElementById('add-driver-error');
+
+    document.getElementById('btn-add-driver').addEventListener('click', () => {
+      addDriverCodeInput.value = '';
+      addDriverError.textContent = '';
+      addDriverModal.classList.add('active');
+    });
+    document.getElementById('btn-close-add-driver').addEventListener('click', () => addDriverModal.classList.remove('active'));
+    document.getElementById('btn-cancel-add-driver').addEventListener('click', () => addDriverModal.classList.remove('active'));
+
+    document.getElementById('btn-confirm-add-driver').addEventListener('click', () => {
+      const code = addDriverCodeInput.value.trim().toUpperCase();
+      if (!code) {
+        addDriverError.textContent = 'Ingresa el código del chofer';
+        return;
+      }
+
+      AuthClient.authedFetch('/api/v1/fleet/claim-driver', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driver_code: code })
+      })
+        .then(r => r.json())
+        .then(res => {
+          if (!res.success) {
+            addDriverError.textContent = res.message || 'No se pudo agregar al chofer';
+            return;
+          }
+          addDriverModal.classList.remove('active');
+          (res.vehicles || []).forEach(v => { upsertVehicle(v); });
+          updateUI();
+          UIComponents.showToastAlert(alertsFeed, {
+            title: 'Chofer Agregado',
+            message: `Se agregó a tu flota con ${res.vehicles.length} vehículo(s)`
+          });
+        })
+        .catch(() => { addDriverError.textContent = 'No se pudo conectar al servidor'; });
+    });
 
     document.getElementById('btn-save-profile').addEventListener('click', () => {
       const driverName = document.getElementById('prof-driver-name').value.trim();

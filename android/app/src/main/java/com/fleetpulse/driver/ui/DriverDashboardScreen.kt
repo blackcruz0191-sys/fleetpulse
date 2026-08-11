@@ -38,6 +38,7 @@ fun DriverDashboardScreen(
     currentLongitude: Double,
     currentSpeedKmh: Float,
     assignedRoute: AssignedRoute?,
+    driverCode: String?,
     onToggleDuty: (Boolean) -> Unit,
     onSendAlert: (AlertType, String) -> Unit,
     onOpenProfile: () -> Unit,
@@ -70,6 +71,13 @@ fun DriverDashboardScreen(
                             fontSize = 12.sp,
                             color = TextMuted
                         )
+                        if (!driverCode.isNullOrBlank()) {
+                            Text(
+                                text = "Código de chofer: $driverCode",
+                                fontSize = 11.sp,
+                                color = CyanAccent
+                            )
+                        }
                     }
                 },
                 actions = {

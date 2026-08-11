@@ -110,13 +110,16 @@ data class LoginRequest(
 data class RegisterRequest(
     @SerializedName("username") val username: String,
     @SerializedName("password") val password: String,
-    @SerializedName("company_name") val companyName: String
+    @SerializedName("company_name") val companyName: String,
+    @SerializedName("role") val role: String = "driver"
 )
 
 data class AuthUser(
     @SerializedName("id") val id: Int,
     @SerializedName("username") val username: String,
-    @SerializedName("companyName") val companyName: String?
+    @SerializedName("companyName") val companyName: String?,
+    @SerializedName("role") val role: String? = null,
+    @SerializedName("driverCode") val driverCode: String? = null
 )
 
 data class AuthResponse(

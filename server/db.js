@@ -36,11 +36,18 @@ async function query(sql, params, mode) {
     return result;
   }
 
-  const sqliteSql = sql.replace(/\$(\d+)/g, '?');
+  // Reindex params to match the actual $n occurrences in order — handles a $n reused more
+  // than once (valid, common Postgres style) by repeating that param positionally, since
+  // SQLite's "?" placeholders bind purely by position, not by number.
+  const orderedParams = [];
+  const sqliteSql = sql.replace(/\$(\d+)/g, (_, n) => {
+    orderedParams.push(params[Number(n) - 1]);
+    return '?';
+  });
   const stmt = sqliteDb.prepare(sqliteSql);
-  if (mode === 'get') return stmt.get(...params) ?? null;
-  if (mode === 'all') return stmt.all(...params);
-  return stmt.run(...params);
+  if (mode === 'get') return stmt.get(...orderedParams) ?? null;
+  if (mode === 'all') return stmt.all(...orderedParams);
+  return stmt.run(...orderedParams);
 }
 
 async function setup() {
@@ -90,6 +97,14 @@ async function setup() {
       CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_user_id);
       CREATE INDEX IF NOT EXISTS idx_routes_vehicle ON routes(vehicle_id);
       CREATE INDEX IF NOT EXISTS idx_alerts_vehicle ON alerts(vehicle_id);
+    `);
+
+    // Migration: role-based accounts (fleet admin vs. independently-registered driver)
+    // and the vehicle -> driver-account link used to "claim" a driver into a fleet.
+    await pgPool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS driver_code TEXT UNIQUE;
+      ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_user_id INTEGER REFERENCES users(id);
     `);
     return;
   }
@@ -147,13 +162,24 @@ async function setup() {
   `);
 
   // Lightweight migration for DBs created before the license_* columns existed.
-  const existing = new Set(sqliteDb.prepare(`PRAGMA table_info(vehicles)`).all().map(c => c.name));
-  const licenseColumns = {
+  const existingVehicleCols = new Set(sqliteDb.prepare(`PRAGMA table_info(vehicles)`).all().map(c => c.name));
+  const vehicleColumns = {
     license_number: 'TEXT', license_category: 'TEXT', license_issue_date: 'TEXT',
-    license_expiry_date: 'TEXT', license_photo_url: 'TEXT', license_restrictions: 'TEXT', license_infractions: 'TEXT'
+    license_expiry_date: 'TEXT', license_photo_url: 'TEXT', license_restrictions: 'TEXT', license_infractions: 'TEXT',
+    driver_user_id: 'INTEGER'
   };
-  for (const [name, def] of Object.entries(licenseColumns)) {
-    if (!existing.has(name)) sqliteDb.exec(`ALTER TABLE vehicles ADD COLUMN ${name} ${def}`);
+  for (const [name, def] of Object.entries(vehicleColumns)) {
+    if (!existingVehicleCols.has(name)) sqliteDb.exec(`ALTER TABLE vehicles ADD COLUMN ${name} ${def}`);
+  }
+
+  // Migration: role-based accounts (fleet admin vs. independently-registered driver).
+  const existingUserCols = new Set(sqliteDb.prepare(`PRAGMA table_info(users)`).all().map(c => c.name));
+  if (!existingUserCols.has('role')) {
+    sqliteDb.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`);
+  }
+  if (!existingUserCols.has('driver_code')) {
+    sqliteDb.exec(`ALTER TABLE users ADD COLUMN driver_code TEXT`);
+    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_driver_code ON users(driver_code)`);
   }
 }
 
@@ -165,21 +191,21 @@ async function countUsers() {
   return Number(row.count);
 }
 
-async function createUser({ username, passwordHash, companyName }) {
+async function createUser({ username, passwordHash, companyName, role = 'admin', driverCode = null }) {
   await setupPromise;
   const now = Date.now();
   if (isPg) {
     const row = await query(
-      'INSERT INTO users (username, password_hash, company_name, created_at) VALUES ($1, $2, $3, $4) RETURNING id',
-      [username, passwordHash, companyName || null, now], 'get'
+      'INSERT INTO users (username, password_hash, company_name, role, driver_code, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [username, passwordHash, companyName || null, role, driverCode, now], 'get'
     );
-    return { id: Number(row.id), username, companyName: companyName || null };
+    return { id: Number(row.id), username, companyName: companyName || null, role, driverCode };
   }
   const info = await query(
-    'INSERT INTO users (username, password_hash, company_name, created_at) VALUES ($1, $2, $3, $4)',
-    [username, passwordHash, companyName || null, now], 'run'
+    'INSERT INTO users (username, password_hash, company_name, role, driver_code, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+    [username, passwordHash, companyName || null, role, driverCode, now], 'run'
   );
-  return { id: Number(info.lastInsertRowid), username, companyName: companyName || null };
+  return { id: Number(info.lastInsertRowid), username, companyName: companyName || null, role, driverCode };
 }
 
 async function findUserByUsername(username) {
@@ -192,6 +218,11 @@ async function findUserById(id) {
   return query('SELECT * FROM users WHERE id = $1', [id], 'get');
 }
 
+async function findUserByDriverCode(code) {
+  await setupPromise;
+  return query('SELECT * FROM users WHERE driver_code = $1', [code], 'get');
+}
+
 async function getVehicle(vehicleId) {
   await setupPromise;
   return query('SELECT * FROM vehicles WHERE id = $1', [vehicleId], 'get');
@@ -200,6 +231,13 @@ async function getVehicle(vehicleId) {
 async function getVehiclesByOwner(ownerUserId) {
   await setupPromise;
   return query('SELECT * FROM vehicles WHERE owner_user_id = $1', [ownerUserId], 'all');
+}
+
+// Vehicles a user can act on: ones they own (fleet admin) or ones they're the linked
+// driver for (their own vehicle, even after being claimed into someone else's fleet).
+async function getVehiclesAccessibleByUser(userId) {
+  await setupPromise;
+  return query('SELECT * FROM vehicles WHERE owner_user_id = $1 OR driver_user_id = $2', [userId, userId], 'all');
 }
 
 async function upsertVehicle(vehicle) {
@@ -212,7 +250,7 @@ async function upsertVehicle(vehicle) {
     'cargo_type', 'cargo_weight_kg', 'lat', 'lng', 'speed', 'heading', 'accuracy',
     'battery', 'fuel', 'temp', 'odometer',
     'license_number', 'license_category', 'license_issue_date', 'license_expiry_date',
-    'license_photo_url', 'license_restrictions', 'license_infractions'
+    'license_photo_url', 'license_restrictions', 'license_infractions', 'driver_user_id'
   ];
 
   if (existing) {
@@ -228,7 +266,16 @@ async function upsertVehicle(vehicle) {
     const placeholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
     const values = [
       vehicle.id, vehicle.owner_user_id,
-      ...fields.map(f => (f === 'type' ? vehicle[f] ?? 'truck' : f === 'status' ? vehicle[f] ?? 'idle' : f === 'speed' ? vehicle[f] ?? 0 : f === 'heading' ? vehicle[f] ?? 0 : vehicle[f] ?? null)),
+      ...fields.map(f => (
+        f === 'type' ? vehicle[f] ?? 'truck' :
+        f === 'status' ? vehicle[f] ?? 'idle' :
+        f === 'speed' ? vehicle[f] ?? 0 :
+        f === 'heading' ? vehicle[f] ?? 0 :
+        // A brand-new vehicle defaults to being its own driver's vehicle (self-registered)
+        // until an admin claims it into their fleet via claimDriverVehicles().
+        f === 'driver_user_id' ? vehicle[f] ?? vehicle.owner_user_id :
+        vehicle[f] ?? null
+      )),
       now, now
     ];
     await query(`INSERT INTO vehicles (${insertFields.join(', ')}) VALUES (${placeholders})`, values, 'run');
@@ -254,6 +301,21 @@ async function insertDocument(doc) {
 async function getDocumentsByVehicle(vehicleId) {
   await setupPromise;
   return query('SELECT * FROM documents WHERE vehicle_id = $1 ORDER BY created_at DESC', [vehicleId], 'all');
+}
+
+// "Claims" a driver into a fleet: reassigns every vehicle still self-owned by that driver
+// (i.e. not already claimed into someone else's fleet) to the admin's account, keeping
+// driver_user_id pointing at the driver so their own app keeps working afterward.
+async function claimDriverVehicles(driverUserId, adminUserId) {
+  await setupPromise;
+  // Each parameter placeholder is used exactly once — the generic $n -> ? translator for
+  // SQLite binds positionally, so reusing e.g. $2 twice would silently misalign params.
+  await query(
+    `UPDATE vehicles SET owner_user_id = $1, driver_user_id = $2 WHERE owner_user_id = $3`,
+    [adminUserId, driverUserId, driverUserId],
+    'run'
+  );
+  return query('SELECT * FROM vehicles WHERE driver_user_id = $1 AND owner_user_id = $2', [driverUserId, adminUserId], 'all');
 }
 
 async function setActiveRoute({ id, vehicleId, ownerUserId, stops }) {
@@ -313,10 +375,13 @@ module.exports = {
   createUser,
   findUserByUsername,
   findUserById,
+  findUserByDriverCode,
   getVehicle,
   getVehiclesByOwner,
+  getVehiclesAccessibleByUser,
   getAllVehicles,
   upsertVehicle,
+  claimDriverVehicles,
   insertDocument,
   getDocumentsByVehicle,
   setActiveRoute,

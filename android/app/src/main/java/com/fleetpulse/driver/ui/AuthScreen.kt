@@ -23,13 +23,14 @@ fun AuthScreen(
     isLoading: Boolean,
     errorMessage: String?,
     onLogin: (username: String, password: String) -> Unit,
-    onRegister: (username: String, password: String, companyName: String) -> Unit
+    onRegister: (username: String, password: String, companyName: String, role: String) -> Unit
 ) {
     var isRegisterTab by remember { mutableStateOf(false) }
 
     var loginUsername by remember { mutableStateOf("") }
     var loginPassword by remember { mutableStateOf("") }
 
+    var registerRole by remember { mutableStateOf("driver") }
     var registerCompany by remember { mutableStateOf("") }
     var registerUsername by remember { mutableStateOf("") }
     var registerPassword by remember { mutableStateOf("") }
@@ -118,15 +119,39 @@ fun AuthScreen(
                         }
                     }
                 } else {
-                    OutlinedTextField(
-                        value = registerCompany,
-                        onValueChange = { registerCompany = it },
-                        label = { Text("Empresa / Nombre de Flota") },
-                        singleLine = true,
-                        colors = fieldColors,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(text = "Me estoy registrando como:", fontSize = 12.sp, color = TextMuted, modifier = Modifier.align(Alignment.Start))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(color = CardNavy, shape = RoundedCornerShape(10.dp))
+                            .padding(4.dp)
+                    ) {
+                        AuthTabButton("Chofer", registerRole == "driver", Modifier.weight(1f)) { registerRole = "driver" }
+                        AuthTabButton("Administrador de Flota", registerRole == "admin", Modifier.weight(1f)) { registerRole = "admin" }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (registerRole == "admin") {
+                        OutlinedTextField(
+                            value = registerCompany,
+                            onValueChange = { registerCompany = it },
+                            label = { Text("Empresa / Nombre de Flota") },
+                            singleLine = true,
+                            colors = fieldColors,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    } else {
+                        Text(
+                            text = "Al registrarte como chofer, recibirás un código único para que tu administrador de flota te agregue.",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            modifier = Modifier.align(Alignment.Start)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     OutlinedTextField(
                         value = registerUsername,
                         onValueChange = { registerUsername = it },
@@ -151,9 +176,12 @@ fun AuthScreen(
                     ErrorText(errorMessage)
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    val isFormValid = registerUsername.isNotBlank() && registerPassword.length >= 6 &&
+                        (registerRole == "driver" || registerCompany.isNotBlank())
+
                     Button(
-                        onClick = { onRegister(registerUsername.trim(), registerPassword, registerCompany.trim()) },
-                        enabled = !isLoading && registerUsername.isNotBlank() && registerPassword.length >= 6 && registerCompany.isNotBlank(),
+                        onClick = { onRegister(registerUsername.trim(), registerPassword, registerCompany.trim(), registerRole) },
+                        enabled = !isLoading && isFormValid,
                         colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen, disabledContainerColor = CardNavy),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().height(52.dp)
