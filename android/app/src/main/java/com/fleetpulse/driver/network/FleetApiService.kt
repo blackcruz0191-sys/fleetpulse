@@ -58,10 +58,9 @@ interface FleetApiService {
     suspend fun uploadLicensePhoto(@Part photo: MultipartBody.Part): Response<UploadResponse>
 
     companion object {
-        // Local dev backend on the host machine's LAN IP (Wi-Fi adapter), so a physical phone
-        // on the same network can reach it. Update this if the PC's IP changes (e.g. new
-        // network, DHCP renewal) — check with `ipconfig` / `Get-NetIPAddress` on the PC.
-        const val BASE_URL = "http://192.168.50.59:3000/"
+        // Production backend on Render, backed by Postgres on Neon — works from any network
+        // with internet access, not just the local WiFi.
+        const val BASE_URL = "https://fleetpulse-4knj.onrender.com/"
 
         fun create(): FleetApiService {
             val client = OkHttpClient.Builder()

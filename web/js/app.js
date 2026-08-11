@@ -141,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
     // 3. Real-Time Server Socket.io Listener (authenticated)
-    const socket = io('http://localhost:3000', {
+    const socket = io(AuthClient.API_BASE, {
       auth: { token: AuthClient.getToken() }
     });
 

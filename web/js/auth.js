@@ -3,7 +3,7 @@
  */
 
 const AuthClient = {
-  API_BASE: 'http://localhost:3000',
+  API_BASE: 'https://fleetpulse-4knj.onrender.com',
 
   getToken() {
     return localStorage.getItem('fleetpulse_token');
