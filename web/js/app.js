@@ -517,9 +517,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-close-profile-modal').addEventListener('click', () => profileModal.classList.remove('active'));
     document.getElementById('btn-cancel-profile').addEventListener('click', () => profileModal.classList.remove('active'));
 
+    let isCreatingNewVehicle = false;
+    const profVehicleIdInput = document.getElementById('prof-vehicle-id');
+    const profVehicleIdGroup = document.getElementById('prof-vehicle-id-group');
+    const profileModalTitle = document.getElementById('profile-modal-title');
+
     function openProfileModal() {
+      isCreatingNewVehicle = false;
       const vehicle = fleet.find(v => v.id === selectedVehicleId);
       if (!vehicle) return;
+
+      profileModalTitle.innerHTML = '<i class="fa-solid fa-id-card"></i> Perfil de Chofer y Vehículo';
+      profVehicleIdGroup.style.display = 'none';
+      profVehicleIdInput.value = vehicle.id;
 
       document.getElementById('prof-driver-name').value = vehicle.driver?.name || '';
       document.getElementById('prof-driver-phone').value = vehicle.driver?.phone || '';
@@ -537,17 +547,38 @@ document.addEventListener('DOMContentLoaded', () => {
       profileModal.classList.add('active');
     }
 
+    function openNewVehicleModal() {
+      isCreatingNewVehicle = true;
+      document.getElementById('profile-form').reset();
+      profileModalTitle.innerHTML = '<i class="fa-solid fa-truck-fast"></i> Nuevo Vehículo';
+      profVehicleIdGroup.style.display = 'flex';
+      profVehicleIdInput.value = '';
+      profileModal.classList.add('active');
+    }
+
+    document.getElementById('btn-add-vehicle').addEventListener('click', openNewVehicleModal);
+
     document.getElementById('btn-save-profile').addEventListener('click', () => {
       const driverName = document.getElementById('prof-driver-name').value.trim();
       const plate = document.getElementById('prof-plate').value.trim();
       const vehicleModel = document.getElementById('prof-vehicle-model').value.trim();
+      const vehicleId = isCreatingNewVehicle ? profVehicleIdInput.value.trim().toUpperCase() : selectedVehicleId;
+
       if (!driverName || !plate || !vehicleModel) {
         alert('Nombre del chofer, modelo y placa son obligatorios');
         return;
       }
+      if (!vehicleId) {
+        alert('El ID de vehículo es obligatorio (ej. CAM-101)');
+        return;
+      }
+      if (isCreatingNewVehicle && fleet.some(v => v.id === vehicleId)) {
+        alert(`Ya existe un vehículo con el ID "${vehicleId}". Usa uno distinto.`);
+        return;
+      }
 
       const payload = {
-        vehicle_id: selectedVehicleId,
+        vehicle_id: vehicleId,
         driver_name: driverName,
         driver_phone: document.getElementById('prof-driver-phone').value.trim(),
         vehicle_model: vehicleModel,
@@ -568,8 +599,18 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify(payload)
       })
         .then(r => r.json())
-        .then(() => {
+        .then((res) => {
+          if (!res.success) {
+            alert(res.message || 'No se pudo guardar el perfil');
+            return;
+          }
           profileModal.classList.remove('active');
+          if (isCreatingNewVehicle) {
+            UIComponents.showToastAlert(alertsFeed, {
+              title: 'Vehículo Registrado',
+              message: `${vehicleId} fue agregado a tu flota`
+            });
+          }
         })
         .catch(() => alert('No se pudo guardar el perfil'));
     });

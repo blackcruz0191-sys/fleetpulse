@@ -140,6 +140,10 @@
         </select>
       </div>
 
+      <button id="btn-add-vehicle" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-truck-fast"></i> Nuevo Vehículo
+      </button>
+
       <button id="btn-add-geofence" class="btn btn-outline btn-sm">
         <i class="fa-solid fa-draw-polygon"></i> Nueva Geocerca
       </button>
@@ -320,11 +324,15 @@
   <div class="modal-overlay" id="profile-modal">
     <div class="modal-card">
       <div class="modal-header">
-        <h3><i class="fa-solid fa-id-card"></i> Perfil de Chofer y Vehículo</h3>
+        <h3 id="profile-modal-title"><i class="fa-solid fa-id-card"></i> Perfil de Chofer y Vehículo</h3>
         <button class="modal-close" id="btn-close-profile-modal"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
         <form id="profile-form">
+          <div class="form-group" id="prof-vehicle-id-group">
+            <label for="prof-vehicle-id">ID de Vehículo (ej. CAM-101)</label>
+            <input type="text" id="prof-vehicle-id" placeholder="Identificador único para este vehículo" />
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label for="prof-driver-name">Nombre del Chofer</label>
@@ -451,11 +459,11 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
   <!-- App JS Modules -->
-  <script src="js/auth.js?v=prod1"></script>
-  <script src="js/data.js?v=prod1"></script>
-  <script src="js/simulator.js?v=prod1"></script>
-  <script src="js/map.js?v=prod1"></script>
-  <script src="js/components.js?v=prod1"></script>
-  <script src="js/app.js?v=prod1"></script>
+  <script src="js/auth.js?v=prod2"></script>
+  <script src="js/data.js?v=prod2"></script>
+  <script src="js/simulator.js?v=prod2"></script>
+  <script src="js/map.js?v=prod2"></script>
+  <script src="js/components.js?v=prod2"></script>
+  <script src="js/app.js?v=prod2"></script>
 </body>
 </html>
