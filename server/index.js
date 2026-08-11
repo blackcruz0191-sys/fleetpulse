@@ -25,6 +25,13 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 app.use('/uploads', express.static(UPLOADS_DIR));
 
+// Serve the web dashboard (Leaflet map, login, etc.) from the same server/URL as the API,
+// so a single Render deploy covers both — no separate static-site hosting needed.
+const WEB_DIR = path.join(__dirname, '..', 'web');
+if (fs.existsSync(WEB_DIR)) {
+  app.use(express.static(WEB_DIR));
+}
+
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const upload = multer({
   storage: multer.diskStorage({
