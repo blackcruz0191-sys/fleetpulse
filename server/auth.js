@@ -18,15 +18,15 @@ async function register({ username, password, companyName }) {
   if (password.length < 6) {
     return { error: 'La contraseña debe tener al menos 6 caracteres', status: 400 };
   }
-  if (db.countUsers() >= db.MAX_FREE_ACCOUNTS) {
+  if ((await db.countUsers()) >= db.MAX_FREE_ACCOUNTS) {
     return { error: 'Se alcanzó el límite de 5000 cuentas gratuitas registradas', status: 403 };
   }
-  if (db.findUserByUsername(username)) {
+  if (await db.findUserByUsername(username)) {
     return { error: 'Ese nombre de usuario ya está registrado', status: 409 };
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = db.createUser({ username, passwordHash, companyName });
+  const user = await db.createUser({ username, passwordHash, companyName });
   const token = signToken(user);
 
   return { token, user: { id: user.id, username: user.username, companyName: user.companyName } };
@@ -37,7 +37,7 @@ async function login({ username, password }) {
     return { error: 'Usuario y contraseña son obligatorios', status: 400 };
   }
 
-  const user = db.findUserByUsername(username);
+  const user = await db.findUserByUsername(username);
   if (!user) {
     return { error: 'Usuario o contraseña incorrectos', status: 401 };
   }
