@@ -10,6 +10,7 @@ import com.fleetpulse.driver.model.DriverProfile
 import com.fleetpulse.driver.model.LocationPayload
 import com.fleetpulse.driver.model.LoginRequest
 import com.fleetpulse.driver.model.RegisterRequest
+import com.fleetpulse.driver.model.SimulationStatus
 import com.fleetpulse.driver.model.TelemetryStatus
 import com.fleetpulse.driver.model.UploadResponse
 import okhttp3.MultipartBody
@@ -52,6 +53,15 @@ interface FleetApiService {
 
     @POST("api/v1/alerts")
     suspend fun sendAlert(@Body payload: AlertPayload): Response<ApiResponse>
+
+    @POST("api/v1/routes/{vehicleId}/simulate/start")
+    suspend fun startRouteSimulation(@Path("vehicleId") vehicleId: String): Response<ApiResponse>
+
+    @POST("api/v1/routes/{vehicleId}/simulate/stop")
+    suspend fun stopRouteSimulation(@Path("vehicleId") vehicleId: String): Response<ApiResponse>
+
+    @GET("api/v1/routes/{vehicleId}/simulate/status")
+    suspend fun getRouteSimulationStatus(@Path("vehicleId") vehicleId: String): Response<SimulationStatus>
 
     @Multipart
     @POST("api/v1/upload/license-photo")

@@ -39,6 +39,9 @@ fun RouteScreen(
     route: AssignedRoute?,
     currentLatitude: Double,
     currentLongitude: Double,
+    isSimulating: Boolean,
+    isSimulationLoading: Boolean,
+    onToggleSimulation: () -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -101,6 +104,29 @@ fun RouteScreen(
                         Text(text = "%.1f km".format(totalKm), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
                         Text(text = "Distancia en línea recta", fontSize = 11.sp, color = TextMuted)
                     }
+                }
+            }
+
+            // Mueve el vehículo automáticamente a lo largo de la ruta real (calculada por el
+            // servidor), útil para probar el flujo completo sin tener que manejar de verdad.
+            Button(
+                onClick = onToggleSimulation,
+                enabled = !isSimulationLoading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isSimulating) Color(0xFFEF4444) else CyanAccent
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                if (isSimulationLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        if (isSimulating) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (isSimulating) "Detener Simulación" else "Simular Recorrido")
                 }
             }
 

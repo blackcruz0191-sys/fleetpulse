@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
 
     private var assignedRoute by mutableStateOf<AssignedRoute?>(null)
     private var showRouteScreen by mutableStateOf(false)
+    private var isSimulatingRoute by mutableStateOf(false)
+    private var isSimulationLoading by mutableStateOf(false)
 
     private val locationBroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -132,9 +134,16 @@ class MainActivity : ComponentActivity() {
                         route = assignedRoute,
                         currentLatitude = currentLat,
                         currentLongitude = currentLng,
+                        isSimulating = isSimulatingRoute,
+                        isSimulationLoading = isSimulationLoading,
+                        onToggleSimulation = { toggleRouteSimulation() },
                         onBack = { showRouteScreen = false },
                         onRefresh = { loadAssignedRoute() }
                     )
+
+                    LaunchedEffect(assignedRoute?.vehicleId) {
+                        loadSimulationStatus()
+                    }
                 } else {
                     val profile = driverProfile!!
                     DriverDashboardScreen(
@@ -247,6 +256,7 @@ class MainActivity : ComponentActivity() {
         showDocumentsScreen = false
         showRouteScreen = false
         assignedRoute = null
+        isSimulatingRoute = false
         isAuthenticated = false
     }
 
@@ -349,6 +359,45 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 // Route info is best-effort for the driver's screen; a failed fetch just
                 // leaves the "Sin ruta asignada" state, no need to surface an error.
+            }
+        }
+    }
+
+    private fun loadSimulationStatus() {
+        val vehicleId = driverProfile?.vehicleId ?: return
+        lifecycleScope.launch {
+            try {
+                val apiService = FleetApiService.create()
+                val response = apiService.getRouteSimulationStatus(vehicleId)
+                if (response.isSuccessful) {
+                    isSimulatingRoute = response.body()?.running ?: false
+                }
+            } catch (e: Exception) {
+                // Estado de simulación es best-effort; si falla, se asume que no está corriendo.
+            }
+        }
+    }
+
+    private fun toggleRouteSimulation() {
+        val vehicleId = driverProfile?.vehicleId ?: return
+        isSimulationLoading = true
+        lifecycleScope.launch {
+            try {
+                val apiService = FleetApiService.create()
+                val response = if (isSimulatingRoute) {
+                    apiService.stopRouteSimulation(vehicleId)
+                } else {
+                    apiService.startRouteSimulation(vehicleId)
+                }
+                if (response.isSuccessful && response.body()?.success == true) {
+                    isSimulatingRoute = !isSimulatingRoute
+                } else {
+                    Toast.makeText(this@MainActivity, response.body()?.message ?: "No se pudo cambiar la simulación", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Sin conexión: no se pudo cambiar la simulación", Toast.LENGTH_LONG).show()
+            } finally {
+                isSimulationLoading = false
             }
         }
     }

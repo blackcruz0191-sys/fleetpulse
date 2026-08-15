@@ -102,6 +102,10 @@ data class ApiResponse(
     @SerializedName("message") val message: String
 )
 
+data class SimulationStatus(
+    @SerializedName("running") val running: Boolean
+)
+
 data class LoginRequest(
     @SerializedName("username") val username: String,
     @SerializedName("password") val password: String
