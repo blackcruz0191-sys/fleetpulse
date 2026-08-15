@@ -91,6 +91,9 @@
 
   <!-- Top App Navigation Header -->
   <header class="app-header">
+    <button id="btn-toggle-sidebar" class="sidebar-toggle-btn" title="Mostrar/Ocultar Flota">
+      <i class="fa-solid fa-bars"></i>
+    </button>
     <div class="brand">
       <div class="brand-logo">
         <i class="fa-solid fa-satellite-dish pulse-icon"></i>
@@ -184,7 +187,10 @@
 
   <!-- Main App Content Area (Sidebar + Map Container) -->
   <main class="app-layout">
-    
+
+    <!-- Dims the map when the sidebar is opened as an off-canvas drawer on mobile -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
     <!-- Left Fleet Navigation Sidebar -->
     <aside class="sidebar" id="fleet-sidebar">
       

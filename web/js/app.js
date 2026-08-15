@@ -133,6 +133,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // DOM Elements
     const vehicleListContainer = document.getElementById('vehicle-list-container');
+    const sidebarEl = document.getElementById('fleet-sidebar');
+    const sidebarToggleBtn = document.getElementById('btn-toggle-sidebar');
+    const sidebarBackdrop = document.getElementById('sidebar-backdrop');
     const drawer = document.getElementById('detail-drawer');
     const drawerContent = document.getElementById('drawer-content');
     const btnCloseDrawer = document.getElementById('btn-close-drawer');
@@ -140,6 +143,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('vehicle-search');
     const btnClearSearch = document.getElementById('btn-clear-search');
     const filterTabs = document.querySelectorAll('.filter-tab');
+
+    // Mobile: the sidebar becomes an off-canvas drawer (see the responsive CSS section)
+    // toggled by the hamburger button in the header, with a backdrop to dismiss it.
+    function closeSidebarMobile() {
+      sidebarEl.classList.remove('open');
+      sidebarBackdrop.classList.remove('active');
+    }
+    sidebarToggleBtn?.addEventListener('click', () => {
+      sidebarEl.classList.toggle('open');
+      sidebarBackdrop.classList.toggle('active');
+    });
+    sidebarBackdrop?.addEventListener('click', closeSidebarMobile);
 
     // Geofence Modal DOM
     const btnAddGeofence = document.getElementById('btn-add-geofence');
@@ -752,6 +767,8 @@ document.addEventListener('DOMContentLoaded', () => {
       selectedVehicleId = id;
       const vehicle = fleet.find(v => v.id === id);
       if (!vehicle) return;
+
+      closeSidebarMobile(); // no-op on desktop; on mobile, picking a vehicle closes the drawer
 
       if (isPickingRoute) endRouteAssignment();
 
