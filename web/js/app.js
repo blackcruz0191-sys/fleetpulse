@@ -127,6 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let fleet = [];
     let geofences = INITIAL_GEOFENCES;
     let selectedVehicleId = null;
+    const simulatingVehicles = new Set(); // vehicleId -> tiene una simulación de recorrido en curso
     let currentFilter = 'all';
     let searchQuery = '';
 
@@ -235,6 +236,20 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('route_updated', (route) => {
       if (selectedVehicleId === route.vehicleId) {
         loadRouteForVehicle(route.vehicleId);
+      }
+    });
+
+    socket.on('simulation_status', (data) => {
+      if (data.running) simulatingVehicles.add(data.vehicleId);
+      else simulatingVehicles.delete(data.vehicleId);
+
+      if (selectedVehicleId === data.vehicleId) loadRouteForVehicle(data.vehicleId);
+
+      if (data.completed) {
+        UIComponents.showToastAlert(alertsFeed, {
+          title: 'Simulación Completada',
+          message: `${data.vehicleId} llegó al final de su ruta simulada`
+        });
       }
     });
 
@@ -382,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
           mapManager.renderStopMarkers(route.stops);
 
           if (waypoints.length < 2) {
-            if (infoContainer) infoContainer.innerHTML = renderRouteStopsOnly(route.stops);
+            if (infoContainer) infoContainer.innerHTML = renderRouteStopsOnly(route.stops) + simulateButtonHtml(vehicleId);
             return;
           }
 
@@ -407,16 +422,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="eta-item"><span class="eta-value">${route.stops.length}</span><span class="eta-label">Paradas</span></div>
                   </div>
                   ${renderRouteStopsOnly(route.stops)}
+                  ${simulateButtonHtml(vehicleId)}
                 `;
               }
             })
             .catch(() => {
-              if (infoContainer) infoContainer.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo calcular la ruta (sin conexión a OSRM).</p>${renderRouteStopsOnly(route.stops)}`;
+              if (infoContainer) infoContainer.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo calcular la ruta (sin conexión a OSRM).</p>${renderRouteStopsOnly(route.stops)}${simulateButtonHtml(vehicleId)}`;
             });
         })
         .catch(() => {
           if (infoContainer) infoContainer.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo cargar la ruta.</p>`;
         });
+    }
+
+    // Botón "Simular Recorrido" / "Detener Simulación" — su estado (corriendo o no) se
+    // guarda localmente en simulatingVehicles y se mantiene al día vía el evento de
+    // socket 'simulation_status', para no tener que consultar el servidor en cada render.
+    function simulateButtonHtml(vehicleId) {
+      const running = simulatingVehicles.has(vehicleId);
+      return `<button id="btn-simulate-route" class="btn ${running ? 'btn-outline' : 'btn-primary'} btn-sm"
+        style="width:100%; margin-top:10px;" data-vehicle-id="${vehicleId}">
+        <i class="fa-solid ${running ? 'fa-stop' : 'fa-play'}"></i> ${running ? 'Detener Simulación' : 'Simular Recorrido'}
+      </button>`;
     }
 
     function renderRouteStopsOnly(stops) {
@@ -701,6 +728,23 @@ document.addEventListener('DOMContentLoaded', () => {
         documentModal.classList.add('active');
       }
       if (e.target.closest('#btn-edit-profile')) openProfileModal();
+
+      const simBtn = e.target.closest('#btn-simulate-route');
+      if (simBtn) {
+        const vehicleId = simBtn.dataset.vehicleId;
+        const action = simulatingVehicles.has(vehicleId) ? 'stop' : 'start';
+        simBtn.disabled = true;
+        AuthClient.authedFetch(`/api/v1/routes/${vehicleId}/simulate/${action}`, { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (!data.success) { alert(data.message || 'No se pudo cambiar la simulación'); return; }
+            if (action === 'start') simulatingVehicles.add(vehicleId);
+            else simulatingVehicles.delete(vehicleId);
+            if (selectedVehicleId === vehicleId) loadRouteForVehicle(vehicleId);
+          })
+          .catch(() => alert('No se pudo conectar al servidor'))
+          .finally(() => { simBtn.disabled = false; });
+      }
     });
 
     // 4. Selection & Filtering logic
@@ -714,7 +758,14 @@ document.addEventListener('DOMContentLoaded', () => {
       UIComponents.renderVehicleDrawer(drawerContent, vehicle);
       drawer.classList.add('open');
       loadDocumentsForVehicle(id);
-      loadRouteForVehicle(id);
+
+      // Sincroniza si ya hay una simulación corriendo para este vehículo (por ejemplo,
+      // si se inició desde otra sesión del dashboard) antes de dibujar el botón.
+      AuthClient.authedFetch(`/api/v1/routes/${id}/simulate/status`)
+        .then(r => r.json())
+        .then(data => { if (data.running) simulatingVehicles.add(id); else simulatingVehicles.delete(id); })
+        .catch(() => {})
+        .finally(() => loadRouteForVehicle(id));
 
       mapManager.centerOnVehicle(vehicle);
       updateUI();

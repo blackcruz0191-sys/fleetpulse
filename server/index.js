@@ -382,6 +382,169 @@ app.get('/api/v1/routes/:vehicleId', asyncRoute(async (req, res) => {
   res.json(route || null);
 }));
 
+// ============================================================
+// SIMULACIÓN DE RECORRIDO — mueve un vehículo a lo largo de su ruta asignada
+// generando ubicaciones GPS realistas (mismo evento 'location_update' que un chofer
+// real), para poder probar el flujo completo sin depender de un celular en campo.
+// ============================================================
+const routeSimulations = new Map(); // vehicleId -> { timer }
+const SIM_TOTAL_STEPS = 60;   // posiciones GPS simuladas a lo largo de toda la ruta
+const SIM_TICK_MS = 2500;     // 1 posición nueva cada 2.5s -> recorrido completo en ~2.5 min
+
+function haversineKm([lat1, lng1], [lat2, lng2]) {
+  const R = 6371;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function bearingDeg([lat1, lng1], [lat2, lng2]) {
+  const toRad = (d) => d * Math.PI / 180;
+  const y = Math.sin(toRad(lng2 - lng1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lng2 - lng1));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function stopVehicleSimulation(vehicleId) {
+  const sim = routeSimulations.get(vehicleId);
+  if (!sim) return false;
+  clearInterval(sim.timer);
+  routeSimulations.delete(vehicleId);
+  return true;
+}
+
+// 6b. Endpoint REST POST API - Iniciar la simulación del recorrido de la ruta activa
+app.post('/api/v1/routes/:vehicleId/simulate/start', asyncRoute(async (req, res) => {
+  const vehicleId = req.params.vehicleId;
+  const resolvedOwner = await resolveVehicleOwner(vehicleId, req.userId);
+  if (resolvedOwner === null) {
+    return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
+  }
+  const ownerUserId = resolvedOwner ?? req.userId;
+
+  const route = await db.getActiveRoute(vehicleId);
+  if (!route || !route.stops || route.stops.length === 0) {
+    return res.status(400).json({ success: false, message: 'Este vehículo no tiene una ruta asignada' });
+  }
+
+  const vehicleRow = await db.getVehicle(vehicleId);
+  const waypoints = [];
+  if (vehicleRow?.lat != null && vehicleRow?.lng != null) {
+    waypoints.push([vehicleRow.lng, vehicleRow.lat]);
+  }
+  route.stops.forEach(s => waypoints.push([s.lng, s.lat]));
+
+  if (waypoints.length < 2) {
+    return res.status(400).json({ success: false, message: 'Se necesita la posición actual del vehículo o al menos 2 paradas para simular el recorrido' });
+  }
+
+  const coordsStr = waypoints.map(([lng, lat]) => `${lng},${lat}`).join(';');
+  let geometry;
+  try {
+    const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`);
+    const osrmData = await osrmRes.json();
+    geometry = osrmData.routes?.[0]?.geometry?.coordinates;
+  } catch (e) {
+    geometry = null;
+  }
+  if (!geometry || geometry.length < 2) {
+    return res.status(502).json({ success: false, message: 'No se pudo calcular la ruta con OSRM para simular el recorrido' });
+  }
+
+  // Muestrea SIM_TOTAL_STEPS puntos distribuidos uniformemente sobre la geometría real de
+  // OSRM, para que la simulación siempre termine en ~2.5 min sin importar el largo real de la ruta.
+  const path = [];
+  for (let i = 0; i < SIM_TOTAL_STEPS; i++) {
+    const idx = Math.min(geometry.length - 1, Math.round((i / (SIM_TOTAL_STEPS - 1)) * (geometry.length - 1)));
+    const [lng, lat] = geometry[idx];
+    path.push([lat, lng]);
+  }
+
+  stopVehicleSimulation(vehicleId); // por si ya había una corriendo, se reinicia
+
+  let step = 0;
+  const timer = setInterval(async () => {
+    step++;
+    if (step >= path.length) {
+      stopVehicleSimulation(vehicleId);
+      try {
+        const finalRow = await db.upsertVehicle({ id: vehicleId, owner_user_id: ownerUserId, status: 'idle', speed: 0 });
+        const finalVehicle = toClientVehicle(finalRow);
+        fleetState.set(vehicleId, finalVehicle);
+        emitToOwner(ownerUserId, 'location_update', finalVehicle);
+      } catch (e) {
+        console.error('[Simulación] error al finalizar', e);
+      }
+      emitToOwner(ownerUserId, 'simulation_status', { vehicleId, running: false, completed: true });
+      console.log(`[Simulación Finalizada] Vehículo: ${vehicleId}`);
+      return;
+    }
+
+    const prev = path[step - 1];
+    const curr = path[step];
+    const distanceKm = haversineKm(prev, curr);
+    const speedKmh = Math.min(90, Math.max(15, distanceKm / (SIM_TICK_MS / 3600000)));
+    const heading = bearingDeg(prev, curr);
+
+    try {
+      const row = await db.upsertVehicle({
+        id: vehicleId,
+        owner_user_id: ownerUserId,
+        status: 'active',
+        lat: curr[0],
+        lng: curr[1],
+        speed: Math.round(speedKmh),
+        heading: Math.round(heading)
+      });
+      const vehicle = toClientVehicle(row);
+      fleetState.set(vehicleId, vehicle);
+      emitToOwner(ownerUserId, 'location_update', vehicle);
+    } catch (e) {
+      console.error('[Simulación] error actualizando posición', e);
+    }
+  }, SIM_TICK_MS);
+
+  routeSimulations.set(vehicleId, { timer });
+  emitToOwner(ownerUserId, 'simulation_status', { vehicleId, running: true });
+
+  console.log(`[Simulación Iniciada] Vehículo: ${vehicleId} (flota ${ownerUserId}) | ${path.length} posiciones a lo largo de la ruta`);
+
+  return res.json({ success: true, message: 'Simulación de recorrido iniciada', steps: path.length });
+}));
+
+// 6c. Endpoint REST POST API - Detener la simulación en curso de un vehículo
+app.post('/api/v1/routes/:vehicleId/simulate/stop', asyncRoute(async (req, res) => {
+  const vehicleId = req.params.vehicleId;
+  const resolvedOwner = await resolveVehicleOwner(vehicleId, req.userId);
+  if (resolvedOwner === null) {
+    return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
+  }
+  const ownerUserId = resolvedOwner ?? req.userId;
+
+  const stopped = stopVehicleSimulation(vehicleId);
+  if (stopped) {
+    const row = await db.upsertVehicle({ id: vehicleId, owner_user_id: ownerUserId, status: 'idle', speed: 0 });
+    const vehicle = toClientVehicle(row);
+    fleetState.set(vehicleId, vehicle);
+    emitToOwner(ownerUserId, 'location_update', vehicle);
+  }
+  emitToOwner(ownerUserId, 'simulation_status', { vehicleId, running: false });
+
+  return res.json({ success: true, message: stopped ? 'Simulación detenida' : 'No había ninguna simulación activa para este vehículo' });
+}));
+
+// 6d. Endpoint REST GET API - Saber si un vehículo tiene una simulación en curso
+app.get('/api/v1/routes/:vehicleId/simulate/status', asyncRoute(async (req, res) => {
+  const vehicleId = req.params.vehicleId;
+  const resolvedOwner = await resolveVehicleOwner(vehicleId, req.userId);
+  if (resolvedOwner === null) {
+    return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
+  }
+  res.json({ running: routeSimulations.has(vehicleId) });
+}));
+
 // 8. Endpoint REST POST API - Registrar una alerta operativa
 // type: FUEL_STOP | EMERGENCY | BREAKDOWN | DRIVER_CHANGE
 const VALID_ALERT_TYPES = ['FUEL_STOP', 'EMERGENCY', 'BREAKDOWN', 'DRIVER_CHANGE'];
