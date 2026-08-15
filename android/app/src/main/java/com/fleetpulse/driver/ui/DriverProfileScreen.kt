@@ -1,5 +1,6 @@
 package com.fleetpulse.driver.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -80,6 +81,10 @@ fun DriverProfileScreen(
     val isFormValid = driverName.isNotBlank() && plate.isNotBlank() &&
         vehicleModel.isNotBlank() && vehicleId.isNotBlank()
 
+    // El botón/gesto físico de retroceso de Android hace lo mismo que la flecha del
+    // encabezado, para que salir de esta pantalla nunca se sienta "atascado".
+    BackHandler(onBack = onCancel)
+
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = TextWhite,
         unfocusedTextColor = TextWhite,
@@ -103,10 +108,15 @@ fun DriverProfileScreen(
                     )
                 },
                 navigationIcon = {
-                    if (!isFirstLaunch) {
-                        IconButton(onClick = onCancel) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = TextWhite)
-                        }
+                    // Always available — on first launch there's no profile to fall back to,
+                    // so "volver" here means cerrar sesión instead of just closing the form
+                    // (MainActivity decides which, based on whether a profile already exists).
+                    IconButton(onClick = onCancel) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = if (isFirstLaunch) "Cerrar sesión" else "Volver",
+                            tint = TextWhite
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = CardNavy)
@@ -127,6 +137,11 @@ fun DriverProfileScreen(
                     text = "Antes de salir a ruta, configura tus datos de chofer y vehículo.",
                     color = TextMuted,
                     fontSize = 13.sp
+                )
+                Text(
+                    text = "Puedes tocar la flecha de arriba para cerrar sesión y volver más tarde.",
+                    color = TextMuted,
+                    fontSize = 11.sp
                 )
             }
 

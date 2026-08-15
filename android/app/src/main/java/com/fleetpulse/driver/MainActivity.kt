@@ -127,7 +127,12 @@ class MainActivity : ComponentActivity() {
                         initialProfile = driverProfile,
                         isFirstLaunch = driverProfile == null,
                         onSave = { profile -> saveDriverProfile(profile) },
-                        onCancel = { showProfileScreen = false }
+                        onCancel = {
+                            // Sin perfil todavía no hay dashboard al que volver — la flecha
+                            // de "volver" en el primer registro cierra sesión en su lugar,
+                            // para no dejar al usuario atrapado sin salida en esta pantalla.
+                            if (driverProfile == null) logout() else showProfileScreen = false
+                        }
                     )
                 } else if (showDocumentsScreen) {
                     val profile = driverProfile!!
