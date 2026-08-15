@@ -22,11 +22,12 @@ import com.fleetpulse.driver.ui.theme.*
 fun AuthScreen(
     isLoading: Boolean,
     errorMessage: String?,
-    onLogin: (username: String, password: String) -> Unit,
+    onLogin: (username: String, password: String, expectedRole: String) -> Unit,
     onRegister: (username: String, password: String, companyName: String, role: String) -> Unit
 ) {
     var isRegisterTab by remember { mutableStateOf(false) }
 
+    var loginRole by remember { mutableStateOf("driver") }
     var loginUsername by remember { mutableStateOf("") }
     var loginPassword by remember { mutableStateOf("") }
 
@@ -81,6 +82,19 @@ fun AuthScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 if (!isRegisterTab) {
+                    Text(text = "Voy a ingresar como:", fontSize = 12.sp, color = TextMuted, modifier = Modifier.align(Alignment.Start))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(color = CardNavy, shape = RoundedCornerShape(10.dp))
+                            .padding(4.dp)
+                    ) {
+                        AuthTabButton("Chofer", loginRole == "driver", Modifier.weight(1f)) { loginRole = "driver" }
+                        AuthTabButton("Administrador de Flota", loginRole == "admin", Modifier.weight(1f)) { loginRole = "admin" }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     OutlinedTextField(
                         value = loginUsername,
                         onValueChange = { loginUsername = it },
@@ -106,7 +120,7 @@ fun AuthScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
-                        onClick = { onLogin(loginUsername.trim(), loginPassword) },
+                        onClick = { onLogin(loginUsername.trim(), loginPassword, loginRole) },
                         enabled = !isLoading && loginUsername.isNotBlank() && loginPassword.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen, disabledContainerColor = CardNavy),
                         shape = RoundedCornerShape(12.dp),

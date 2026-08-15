@@ -36,6 +36,7 @@ import com.fleetpulse.driver.model.LoginRequest
 import com.fleetpulse.driver.model.RegisterRequest
 import com.fleetpulse.driver.network.FleetApiService
 import com.fleetpulse.driver.service.LocationTrackingService
+import com.fleetpulse.driver.ui.AdminHomeScreen
 import com.fleetpulse.driver.ui.AuthScreen
 import com.fleetpulse.driver.ui.DocumentsScreen
 import com.fleetpulse.driver.ui.DriverDashboardScreen
@@ -109,8 +110,17 @@ class MainActivity : ComponentActivity() {
                     AuthScreen(
                         isLoading = isAuthLoading,
                         errorMessage = authError,
-                        onLogin = { username, password -> login(username, password) },
+                        onLogin = { username, password, expectedRole -> login(username, password, expectedRole) },
                         onRegister = { username, password, companyName, role -> register(username, password, companyName, role) }
+                    )
+                } else if (SessionManager.role == "admin") {
+                    AdminHomeScreen(
+                        username = SessionManager.username,
+                        companyName = SessionManager.companyName,
+                        onOpenDashboard = {
+                            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(FleetApiService.BASE_URL)))
+                        },
+                        onLogout = { logout() }
                     )
                 } else if (driverProfile == null || showProfileScreen) {
                     DriverProfileScreen(
@@ -198,7 +208,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun login(username: String, password: String) {
+    private fun login(username: String, password: String, expectedRole: String) {
         authError = null
         isAuthLoading = true
         lifecycleScope.launch {
@@ -207,6 +217,14 @@ class MainActivity : ComponentActivity() {
                 val response = apiService.login(LoginRequest(username, password))
                 val body = response.body()
                 if (response.isSuccessful && body?.token != null && body.user != null) {
+                    val actualRole = body.user.role ?: "admin"
+                    if (actualRole != expectedRole) {
+                        authError = if (actualRole == "admin")
+                            "Esta cuenta es de Administrador de Flota. Cambia a esa pestaña para ingresar."
+                        else
+                            "Esta cuenta es de Chofer. Cambia a esa pestaña para ingresar."
+                        return@launch
+                    }
                     SessionManager.save(this@MainActivity, body.token, body.user.username, body.user.companyName, body.user.role, body.user.driverCode)
                     isAuthenticated = true
                 } else {
