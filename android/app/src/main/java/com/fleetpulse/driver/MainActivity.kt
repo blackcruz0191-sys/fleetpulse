@@ -12,14 +12,19 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,6 +39,7 @@ import com.fleetpulse.driver.model.DigitalDocument
 import com.fleetpulse.driver.model.DriverProfile
 import com.fleetpulse.driver.model.LoginRequest
 import com.fleetpulse.driver.model.RegisterRequest
+import com.fleetpulse.driver.model.RemoteVehicle
 import com.fleetpulse.driver.network.FleetApiService
 import com.fleetpulse.driver.service.LocationTrackingService
 import com.fleetpulse.driver.ui.AdminHomeScreen
@@ -63,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var profileStore: ProfileStore
     private var driverProfile by mutableStateOf<DriverProfile?>(null)
     private var showProfileScreen by mutableStateOf(false)
+    private var isRestoringProfile by mutableStateOf(false)
 
     private var showDocumentsScreen by mutableStateOf(false)
     private var documents by mutableStateOf<List<DigitalDocument>>(emptyList())
@@ -104,6 +111,14 @@ class MainActivity : ComponentActivity() {
         driverProfile = profileStore.load()
         showProfileScreen = driverProfile == null
 
+        // A driver's profile lives locally (SharedPreferences) for offline access, but a
+        // reinstall / cleared app data / new device wipes it even though the vehicle still
+        // exists on the server — without this, the app would wrongly treat them as a brand
+        // new driver and force the whole "primer registro" form again.
+        if (isAuthenticated && driverProfile == null && SessionManager.role != "admin") {
+            restoreProfileFromServer()
+        }
+
         setContent {
             FleetPulseTheme {
                 if (!isAuthenticated) {
@@ -122,6 +137,17 @@ class MainActivity : ComponentActivity() {
                         },
                         onLogout = { logout() }
                     )
+                } else if (isRestoringProfile) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(com.fleetpulse.driver.ui.theme.NavyDark),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = com.fleetpulse.driver.ui.theme.CyanAccent)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Recuperando tu perfil...", color = com.fleetpulse.driver.ui.theme.TextMuted)
+                        }
+                    }
                 } else if (driverProfile == null || showProfileScreen) {
                     DriverProfileScreen(
                         initialProfile = driverProfile,
@@ -232,6 +258,12 @@ class MainActivity : ComponentActivity() {
                     }
                     SessionManager.save(this@MainActivity, body.token, body.user.username, body.user.companyName, body.user.role, body.user.driverCode)
                     isAuthenticated = true
+                    // A driver logging in on a device/install that never saved a local
+                    // profile (reinstall, cleared data, new phone) — check the server
+                    // before assuming they're a brand-new driver with nothing set up.
+                    if (actualRole == "driver" && driverProfile == null) {
+                        restoreProfileFromServer()
+                    }
                 } else {
                     authError = body?.message ?: "Usuario o contraseña incorrectos"
                 }
@@ -281,6 +313,48 @@ class MainActivity : ComponentActivity() {
         assignedRoute = null
         isSimulatingRoute = false
         isAuthenticated = false
+    }
+
+    private fun restoreProfileFromServer() {
+        isRestoringProfile = true
+        lifecycleScope.launch {
+            try {
+                val apiService = FleetApiService.create()
+                val response = apiService.getVehicles()
+                if (response.isSuccessful) {
+                    val mine = response.body().orEmpty().firstOrNull()
+                    if (mine != null) {
+                        val restored = DriverProfile(
+                            vehicleId = mine.id,
+                            plate = mine.plate.orEmpty(),
+                            driverName = mine.driver?.name.orEmpty(),
+                            driverPhone = mine.driver?.phone?.takeIf { it.isNotBlank() } ?: "+51 900 000 000",
+                            vehicleModel = mine.name.orEmpty(),
+                            cargoType = mine.cargo?.type?.takeIf { it.isNotBlank() } ?: "Carga General",
+                            cargoWeightKg = mine.cargo?.weightKg ?: 0f,
+                            licenseNumber = mine.driver?.license?.number.orEmpty(),
+                            licenseCategory = mine.driver?.license?.category.orEmpty(),
+                            licenseIssueDate = mine.driver?.license?.issueDate.orEmpty(),
+                            licenseExpiryDate = mine.driver?.license?.expiryDate.orEmpty(),
+                            licensePhotoUrl = mine.driver?.license?.photoUrl.orEmpty(),
+                            licenseRestrictions = mine.driver?.license?.restrictions.orEmpty(),
+                            licenseInfractions = mine.driver?.license?.infractions.orEmpty()
+                        )
+                        profileStore.save(restored)
+                        driverProfile = restored
+                        showProfileScreen = false
+                    }
+                }
+                // If there's genuinely no vehicle yet for this account, driverProfile stays
+                // null and the normal "primer registro" form shows — that part is correct
+                // for an actually-new driver.
+            } catch (e: Exception) {
+                // Best-effort restore; on failure the driver just sees the profile form as
+                // before and can fill it in (upserts the same vehicle_id if they know it).
+            } finally {
+                isRestoringProfile = false
+            }
+        }
     }
 
     private fun saveDriverProfile(profile: DriverProfile) {

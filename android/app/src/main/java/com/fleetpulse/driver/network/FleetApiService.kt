@@ -10,6 +10,7 @@ import com.fleetpulse.driver.model.DriverProfile
 import com.fleetpulse.driver.model.LocationPayload
 import com.fleetpulse.driver.model.LoginRequest
 import com.fleetpulse.driver.model.RegisterRequest
+import com.fleetpulse.driver.model.RemoteVehicle
 import com.fleetpulse.driver.model.SimulationStatus
 import com.fleetpulse.driver.model.TelemetryStatus
 import com.fleetpulse.driver.model.UploadResponse
@@ -41,6 +42,12 @@ interface FleetApiService {
 
     @POST("api/v1/driver/profile")
     suspend fun sendDriverProfile(@Body payload: DriverProfile): Response<ApiResponse>
+
+    // Vehicles this account can act on — for a driver, their own vehicle if it was
+    // already created (by a previous profile save or GPS ping), used to restore the
+    // local profile after a reinstall instead of re-asking for data that already exists.
+    @GET("api/v1/vehicles")
+    suspend fun getVehicles(): Response<List<RemoteVehicle>>
 
     @POST("api/v1/documents")
     suspend fun sendDocument(@Body payload: DigitalDocument): Response<ApiResponse>

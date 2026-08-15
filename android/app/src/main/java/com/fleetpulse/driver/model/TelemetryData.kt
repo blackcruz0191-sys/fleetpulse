@@ -106,6 +106,39 @@ data class SimulationStatus(
     @SerializedName("running") val running: Boolean
 )
 
+// Shape returned by GET /api/v1/vehicles (toClientVehicle() on the server) — used to
+// restore a driver's saved profile from the server when the local device copy is
+// missing (fresh install, cleared app data, new device), instead of forcing them
+// through the "primer registro" form again for a vehicle that already exists.
+data class RemoteVehicle(
+    @SerializedName("id") val id: String,
+    @SerializedName("plate") val plate: String?,
+    @SerializedName("name") val name: String?,
+    @SerializedName("driver") val driver: RemoteDriverInfo?,
+    @SerializedName("cargo") val cargo: RemoteCargoInfo?
+)
+
+data class RemoteDriverInfo(
+    @SerializedName("name") val name: String?,
+    @SerializedName("phone") val phone: String?,
+    @SerializedName("license") val license: RemoteLicenseInfo?
+)
+
+data class RemoteLicenseInfo(
+    @SerializedName("number") val number: String?,
+    @SerializedName("category") val category: String?,
+    @SerializedName("issueDate") val issueDate: String?,
+    @SerializedName("expiryDate") val expiryDate: String?,
+    @SerializedName("photoUrl") val photoUrl: String?,
+    @SerializedName("restrictions") val restrictions: String?,
+    @SerializedName("infractions") val infractions: String?
+)
+
+data class RemoteCargoInfo(
+    @SerializedName("type") val type: String?,
+    @SerializedName("weightKg") val weightKg: Float?
+)
+
 data class LoginRequest(
     @SerializedName("username") val username: String,
     @SerializedName("password") val password: String
