@@ -327,6 +327,8 @@
         </div>
       </div>
       <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-export-alerts-csv"><i class="fa-solid fa-file-csv"></i> Exportar CSV</button>
+        <button class="btn btn-outline" id="btn-export-alerts-pdf"><i class="fa-solid fa-file-pdf"></i> Exportar PDF</button>
         <button class="btn btn-outline" id="btn-close-alerts-log-2">Cerrar</button>
       </div>
     </div>
@@ -551,12 +553,17 @@
   <!-- Socket.io Client for Real-time Server Sync -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
+  <!-- jsPDF + AutoTable, for the "Exportar PDF" report buttons -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
   <!-- App JS Modules -->
-  <script src="js/auth.js?v=prod3"></script>
-  <script src="js/data.js?v=prod3"></script>
-  <script src="js/simulator.js?v=prod3"></script>
-  <script src="js/map.js?v=prod3"></script>
-  <script src="js/components.js?v=prod3"></script>
-  <script src="js/app.js?v=prod3"></script>
+  <script src="js/auth.js?v=prod4"></script>
+  <script src="js/data.js?v=prod4"></script>
+  <script src="js/simulator.js?v=prod4"></script>
+  <script src="js/map.js?v=prod4"></script>
+  <script src="js/components.js?v=prod4"></script>
+  <script src="js/export.js?v=prod4"></script>
+  <script src="js/app.js?v=prod4"></script>
 </body>
 </html>

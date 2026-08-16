@@ -364,6 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const alertsLogList = document.getElementById('alerts-log-list');
     const alertsBadge = document.getElementById('alerts-badge');
     let openAlertCount = 0;
+    let lastLoadedAlerts = []; // kept in sync by loadAlertsLog(), read by the export buttons
 
     function updateAlertsBadge() {
       if (openAlertCount > 0) {
@@ -382,6 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
       AuthClient.authedFetch('/api/v1/alerts')
         .then(r => r.json())
         .then(alerts => {
+          lastLoadedAlerts = alerts;
           openAlertCount = alerts.filter(a => a.status === 'OPEN').length;
           updateAlertsBadge();
 
@@ -427,6 +429,30 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-close-alerts-log').addEventListener('click', () => alertsLogModal.classList.remove('active'));
     document.getElementById('btn-close-alerts-log-2').addEventListener('click', () => alertsLogModal.classList.remove('active'));
 
+    function alertsReportRows() {
+      const headers = ['Fecha', 'Vehículo', 'Tipo', 'Mensaje', 'Estado'];
+      const rows = lastLoadedAlerts.map(a => [
+        formatAlertTime(a.createdAt),
+        a.vehicleId,
+        (ALERT_LABELS[a.type] || { title: a.type }).title,
+        a.message || 'Sin comentario',
+        a.status === 'RESOLVED' ? 'Resuelta' : 'Abierta'
+      ]);
+      return { headers, rows };
+    }
+
+    document.getElementById('btn-export-alerts-csv').addEventListener('click', () => {
+      if (!lastLoadedAlerts.length) { alert('No hay alertas para exportar'); return; }
+      const { headers, rows } = alertsReportRows();
+      ExportUtils.toCsv('fleetpulse_alertas.csv', headers, rows);
+    });
+
+    document.getElementById('btn-export-alerts-pdf').addEventListener('click', () => {
+      if (!lastLoadedAlerts.length) { alert('No hay alertas para exportar'); return; }
+      const { headers, rows } = alertsReportRows();
+      ExportUtils.toPdf('Historial de Alertas', headers, rows);
+    });
+
     // Populate the badge on load without waiting for the user to open the panel
     loadAlertsLog();
 
@@ -440,10 +466,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Fetch and render digital documents for the selected vehicle
+    let lastLoadedDocuments = []; // kept in sync here, read by the "Exportar" button below
     function loadDocumentsForVehicle(vehicleId) {
       AuthClient.authedFetch(`/api/v1/documents/${vehicleId}`)
         .then(r => r.json())
         .then(docs => {
+          lastLoadedDocuments = docs;
           const container = document.getElementById('drawer-documents-list');
           UIComponents.renderDocumentsList(container, docs);
         })
@@ -809,6 +837,21 @@ document.addEventListener('DOMContentLoaded', () => {
         documentModal.classList.add('active');
       }
       if (e.target.closest('#btn-edit-profile')) openProfileModal();
+
+      if (e.target.closest('#btn-export-documents')) {
+        if (!lastLoadedDocuments.length) { alert('Este vehículo no tiene documentos para exportar'); return; }
+        const headers = ['Fecha', 'Tipo', 'N° Documento', 'Cliente', 'RUC', 'Total (S/)', 'Estado'];
+        const rows = lastLoadedDocuments.map(d => [
+          new Date(d.createdAt).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          d.docType,
+          d.docNumber,
+          d.clientName,
+          d.clientRuc || '—',
+          Number(d.totalAmount || 0).toFixed(2),
+          d.status
+        ]);
+        ExportUtils.toPdf(`Documentos — ${selectedVehicleId}`, headers, rows);
+      }
 
       const simBtn = e.target.closest('#btn-simulate-route');
       if (simBtn) {

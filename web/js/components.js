@@ -132,7 +132,10 @@ const UIComponents = {
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 8px;">
         <h4 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">Documentación Digital</h4>
-        <button class="btn btn-outline btn-sm" id="btn-new-document"><i class="fa-solid fa-plus"></i> Nuevo</button>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-outline btn-sm" id="btn-export-documents" title="Exportar PDF"><i class="fa-solid fa-file-export"></i></button>
+          <button class="btn btn-outline btn-sm" id="btn-new-document"><i class="fa-solid fa-plus"></i> Nuevo</button>
+        </div>
       </div>
       <div id="drawer-documents-list" class="documents-list">
         <p style="color: var(--text-muted); font-size: 0.85rem;">Cargando documentos...</p>
