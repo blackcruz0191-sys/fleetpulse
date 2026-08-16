@@ -35,6 +35,9 @@ class LocationTrackingService : Service() {
     private var driverName: String = "Chofer"
     private var plate: String = ""
     private var cargoInfo: String = ""
+    // Empieza en 100 (tanque lleno) al salir a ruta; el chofer puede corregirlo en
+    // cualquier momento (ACTION_UPDATE_FUEL) tras repostar o si el valor no era exacto.
+    private var fuelLevel: Float = 100f
 
     override fun onCreate() {
         super.onCreate()
@@ -53,7 +56,8 @@ class LocationTrackingService : Service() {
                         longitude = location.longitude,
                         speedKmh = location.speed * 3.6f, // m/s to km/h
                         heading = location.bearing,
-                        accuracyMeters = location.accuracy
+                        accuracyMeters = location.accuracy,
+                        fuelLevel = fuelLevel
                     )
                     
                     Log.d(TAG, "GPS Update: Lat=${payload.latitude}, Lng=${payload.longitude}, Speed=${payload.speedKmh} km/h")
@@ -79,6 +83,7 @@ class LocationTrackingService : Service() {
                 driverName = intent.getStringExtra(EXTRA_DRIVER_NAME) ?: "Chofer"
                 plate = intent.getStringExtra(EXTRA_PLATE) ?: ""
                 cargoInfo = intent.getStringExtra(EXTRA_CARGO_INFO) ?: ""
+                fuelLevel = intent.getFloatExtra(EXTRA_FUEL_LEVEL, 100f)
                 startForegroundServiceWithNotification()
                 startLocationUpdates()
             }
@@ -86,6 +91,11 @@ class LocationTrackingService : Service() {
                 stopLocationUpdates()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
+            }
+            ACTION_UPDATE_FUEL -> {
+                // El chofer corrigió o actualizó el nivel manualmente (p.ej. tras repostar
+                // a mitad de ruta) — el siguiente ping GPS ya sale con el valor nuevo.
+                fuelLevel = intent.getFloatExtra(EXTRA_FUEL_LEVEL, fuelLevel)
             }
         }
         return START_STICKY
@@ -215,6 +225,7 @@ class LocationTrackingService : Service() {
 
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
+        const val ACTION_UPDATE_FUEL = "ACTION_UPDATE_FUEL"
         const val ACTION_LOCATION_UPDATE = "ACTION_LOCATION_UPDATE"
         const val ACTION_QUEUE_UPDATE = "ACTION_QUEUE_UPDATE"
 
@@ -222,6 +233,7 @@ class LocationTrackingService : Service() {
         const val EXTRA_DRIVER_NAME = "EXTRA_DRIVER_NAME"
         const val EXTRA_PLATE = "EXTRA_PLATE"
         const val EXTRA_CARGO_INFO = "EXTRA_CARGO_INFO"
+        const val EXTRA_FUEL_LEVEL = "EXTRA_FUEL_LEVEL"
         const val EXTRA_LAT = "EXTRA_LAT"
         const val EXTRA_LNG = "EXTRA_LNG"
         const val EXTRA_SPEED = "EXTRA_SPEED"

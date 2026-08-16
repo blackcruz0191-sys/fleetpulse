@@ -156,6 +156,7 @@ app.use('/api/v1/routes', auth.authMiddleware);
 app.use('/api/v1/alerts', auth.authMiddleware);
 app.use('/api/v1/upload', auth.authMiddleware);
 app.use('/api/v1/fleet', auth.authMiddleware);
+app.use('/api/v1/reports', auth.authMiddleware);
 
 // Confirms the authenticated user can act on vehicleId — either as its fleet owner (admin)
 // or as its linked driver account (still works after an admin claims the vehicle into their
@@ -382,6 +383,34 @@ app.get('/api/v1/routes/:vehicleId', asyncRoute(async (req, res) => {
   res.json(route || null);
 }));
 
+// 6a. Endpoint REST POST API - Marcar la ruta activa de un vehiculo como completada
+// (sin asignar una nueva), capturando el nivel de combustible actual para el reporte.
+app.post('/api/v1/routes/:vehicleId/complete', asyncRoute(async (req, res) => {
+  const vehicleId = req.params.vehicleId;
+  const resolvedOwner = await resolveVehicleOwner(vehicleId, req.userId);
+  if (resolvedOwner === null) {
+    return res.status(403).json({ success: false, message: 'Ese vehículo pertenece a otra cuenta' });
+  }
+
+  const route = await db.getActiveRoute(vehicleId);
+  if (!route) {
+    return res.status(400).json({ success: false, message: 'Este vehículo no tiene una ruta activa' });
+  }
+
+  await db.completeRoute(vehicleId);
+  const ownerUserId = resolvedOwner ?? req.userId;
+  emitToOwner(ownerUserId, 'route_updated', { vehicleId, completed: true });
+
+  return res.json({ success: true, message: 'Ruta marcada como completada' });
+}));
+
+// 6b. Endpoint REST GET API - Reporte de combustible: todas las rutas completadas
+// de la flota, con el nivel de tanque al iniciar y terminar cada una.
+app.get('/api/v1/reports/fuel', asyncRoute(async (req, res) => {
+  const routes = await db.getCompletedRoutesByOwner(req.userId);
+  res.json(routes);
+}));
+
 // ============================================================
 // SIMULACIÓN DE RECORRIDO — mueve un vehículo a lo largo de su ruta asignada
 // generando ubicaciones GPS realistas (mismo evento 'location_update' que un chofer
@@ -474,6 +503,11 @@ app.post('/api/v1/routes/:vehicleId/simulate/start', asyncRoute(async (req, res)
         const finalVehicle = toClientVehicle(finalRow);
         fleetState.set(vehicleId, finalVehicle);
         emitToOwner(ownerUserId, 'location_update', finalVehicle);
+
+        // El recorrido simulado también "llega a destino" para efectos del reporte
+        // de combustible, igual que si un chofer real hubiera completado la ruta.
+        await db.completeRoute(vehicleId);
+        emitToOwner(ownerUserId, 'route_updated', { vehicleId, completed: true });
       } catch (e) {
         console.error('[Simulación] error al finalizar', e);
       }

@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private var currentLng by mutableStateOf(-77.042793)
     private var currentSpeed by mutableStateOf(0f)
     private var pendingGpsCount by mutableStateOf(0) // posiciones GPS encoladas esperando conexión
+    private var currentFuelPct by mutableStateOf(100f) // se asume tanque lleno al iniciar cada jornada
 
     private var isAuthenticated by mutableStateOf(false)
     private var isAuthLoading by mutableStateOf(false)
@@ -203,6 +204,8 @@ class MainActivity : ComponentActivity() {
                         currentLongitude = currentLng,
                         currentSpeedKmh = currentSpeed,
                         pendingGpsCount = pendingGpsCount,
+                        fuelPct = currentFuelPct,
+                        onUpdateFuel = { pct -> updateFuelLevel(pct) },
                         assignedRoute = assignedRoute,
                         driverCode = SessionManager.driverCode,
                         onToggleDuty = { enabled ->
@@ -572,20 +575,22 @@ class MainActivity : ComponentActivity() {
 
     private fun startTrackingService() {
         val profile = driverProfile
+        currentFuelPct = 100f // cada nueva jornada empieza asumiendo tanque lleno
         val serviceIntent = Intent(this, LocationTrackingService::class.java).apply {
             action = LocationTrackingService.ACTION_START_TRACKING
             putExtra(LocationTrackingService.EXTRA_VEHICLE_ID, profile?.vehicleId ?: "CAM-101")
             putExtra(LocationTrackingService.EXTRA_DRIVER_NAME, profile?.driverName ?: "Chofer")
             putExtra(LocationTrackingService.EXTRA_PLATE, profile?.plate ?: "")
             putExtra(LocationTrackingService.EXTRA_CARGO_INFO, profile?.cargoType ?: "")
+            putExtra(LocationTrackingService.EXTRA_FUEL_LEVEL, currentFuelPct)
         }
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
         } else {
             startService(serviceIntent)
         }
-        
+
         isTrackingActive = true
     }
 
@@ -595,5 +600,19 @@ class MainActivity : ComponentActivity() {
         }
         startService(serviceIntent)
         isTrackingActive = false
+    }
+
+    // El chofer corrige/actualiza el nivel de combustible (p.ej. repostó a mitad de
+    // ruta) — si el servicio de rastreo está activo, el próximo ping GPS ya sale con
+    // el valor nuevo; si no, solo queda listo para la próxima vez que inicie jornada.
+    private fun updateFuelLevel(pct: Float) {
+        currentFuelPct = pct
+        if (isTrackingActive) {
+            val serviceIntent = Intent(this, LocationTrackingService::class.java).apply {
+                action = LocationTrackingService.ACTION_UPDATE_FUEL
+                putExtra(LocationTrackingService.EXTRA_FUEL_LEVEL, pct)
+            }
+            startService(serviceIntent)
+        }
     }
 }

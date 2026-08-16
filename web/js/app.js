@@ -318,6 +318,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (selectedVehicleId === route.vehicleId) {
         loadRouteForVehicle(route.vehicleId);
       }
+      if (route.completed && fuelReportModal.classList.contains('active')) {
+        loadFuelReport();
+      }
     });
 
     socket.on('simulation_status', (data) => {
@@ -456,6 +459,90 @@ document.addEventListener('DOMContentLoaded', () => {
     // Populate the badge on load without waiting for the user to open the panel
     loadAlertsLog();
 
+    // ------------------------------------------------------------
+    // Fuel Report — start/end tank level for every completed route, so an
+    // admin can see whether a vehicle left with a full tank and how much
+    // fuel each trip actually used.
+    // ------------------------------------------------------------
+    const fuelReportModal = document.getElementById('fuel-report-modal');
+    const fuelReportList = document.getElementById('fuel-report-list');
+    let lastLoadedFuelReport = [];
+
+    function formatFuelPct(v) {
+      return v == null ? '—' : `${Math.round(v)}%`;
+    }
+
+    function loadFuelReport() {
+      AuthClient.authedFetch('/api/v1/reports/fuel')
+        .then(r => r.json())
+        .then(routes => {
+          lastLoadedFuelReport = routes;
+
+          if (!routes.length) {
+            fuelReportList.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">Todavía no hay rutas completadas.</p>`;
+            return;
+          }
+
+          fuelReportList.innerHTML = routes.map(r => {
+            const consumed = (r.startFuel != null && r.endFuel != null) ? (r.startFuel - r.endFuel) : null;
+            return `
+              <div class="alert-log-row">
+                <div class="alert-log-icon"><i class="fa-solid fa-gas-pump"></i></div>
+                <div class="alert-log-body">
+                  <div class="alert-log-title">${r.vehicleId} — ${r.vehiclePlate || 's/placa'} · ${r.stops.length} parada(s)</div>
+                  <div class="alert-log-meta">
+                    ${formatAlertTime(r.completedAt)} ·
+                    Salida: ${formatFuelPct(r.startFuel)}${r.fullTank ? ' (tanque lleno)' : ' (no lleno)'} ·
+                    Llegada: ${formatFuelPct(r.endFuel)} ·
+                    Consumo: ${consumed != null ? Math.round(consumed) + '%' : '—'}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        })
+        .catch(() => {
+          fuelReportList.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo cargar el reporte de combustible.</p>`;
+        });
+    }
+
+    function fuelReportRows() {
+      const headers = ['Fecha', 'Vehículo', 'Placa', 'Paradas', 'Salió con tanque lleno', 'Combustible Salida', 'Combustible Llegada', 'Consumo'];
+      const rows = lastLoadedFuelReport.map(r => {
+        const consumed = (r.startFuel != null && r.endFuel != null) ? (r.startFuel - r.endFuel) : null;
+        return [
+          formatAlertTime(r.completedAt),
+          r.vehicleId,
+          r.vehiclePlate || '—',
+          String(r.stops.length),
+          r.fullTank ? 'Sí' : 'No',
+          formatFuelPct(r.startFuel),
+          formatFuelPct(r.endFuel),
+          consumed != null ? `${Math.round(consumed)}%` : '—'
+        ];
+      });
+      return { headers, rows };
+    }
+
+    document.getElementById('btn-open-fuel-report').addEventListener('click', () => {
+      fuelReportModal.classList.add('active');
+      loadFuelReport();
+    });
+    document.getElementById('btn-close-fuel-report').addEventListener('click', () => fuelReportModal.classList.remove('active'));
+    document.getElementById('btn-close-fuel-report-2').addEventListener('click', () => fuelReportModal.classList.remove('active'));
+
+    document.getElementById('btn-export-fuel-csv').addEventListener('click', () => {
+      if (!lastLoadedFuelReport.length) { alert('No hay rutas completadas para exportar'); return; }
+      const { headers, rows } = fuelReportRows();
+      ExportUtils.toCsv('fleetpulse_combustible.csv', headers, rows);
+    });
+
+    document.getElementById('btn-export-fuel-pdf').addEventListener('click', () => {
+      if (!lastLoadedFuelReport.length) { alert('No hay rutas completadas para exportar'); return; }
+      const { headers, rows } = fuelReportRows();
+      ExportUtils.toPdf('Reporte de Combustible', headers, rows);
+    });
+
     function upsertVehicle(serverVehicle) {
       const index = fleet.findIndex(v => v.id === serverVehicle.id);
       if (index !== -1) {
@@ -506,7 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
           mapManager.renderStopMarkers(route.stops);
 
           if (waypoints.length < 2) {
-            if (infoContainer) infoContainer.innerHTML = renderRouteStopsOnly(route.stops) + simulateButtonHtml(vehicleId);
+            if (infoContainer) infoContainer.innerHTML = renderRouteStopsOnly(route.stops) + routeFuelHtml(route) + simulateButtonHtml(vehicleId);
             return;
           }
 
@@ -531,17 +618,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="eta-item"><span class="eta-value">${route.stops.length}</span><span class="eta-label">Paradas</span></div>
                   </div>
                   ${renderRouteStopsOnly(route.stops)}
+                  ${routeFuelHtml(route)}
                   ${simulateButtonHtml(vehicleId)}
                 `;
               }
             })
             .catch(() => {
-              if (infoContainer) infoContainer.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo calcular la ruta (sin conexión a OSRM).</p>${renderRouteStopsOnly(route.stops)}${simulateButtonHtml(vehicleId)}`;
+              if (infoContainer) infoContainer.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo calcular la ruta (sin conexión a OSRM).</p>${renderRouteStopsOnly(route.stops)}${routeFuelHtml(route)}${simulateButtonHtml(vehicleId)}`;
             });
         })
         .catch(() => {
           if (infoContainer) infoContainer.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">No se pudo cargar la ruta.</p>`;
         });
+    }
+
+    // Muestra si el vehículo salió con el tanque lleno para esta ruta, y el botón para
+    // marcarla como completada manualmente (captura el combustible actual como "final"
+    // para el reporte de consumo, sin necesidad de esperar a que se asigne otra ruta).
+    function routeFuelHtml(route) {
+      const fullTankBadge = route.fullTank
+        ? `<span style="color: var(--color-active);"><i class="fa-solid fa-check"></i> Salió con el tanque lleno</span>`
+        : `<span style="color: var(--color-idle);"><i class="fa-solid fa-triangle-exclamation"></i> No salió con el tanque lleno${route.startFuel != null ? ` (${Math.round(route.startFuel)}%)` : ''}</span>`;
+      return `
+        <div style="margin-top:10px; font-size:0.78rem;">${fullTankBadge}</div>
+        <button id="btn-complete-route" class="btn btn-outline btn-sm" style="width:100%; margin-top:8px;" data-vehicle-id="${route.vehicleId}">
+          <i class="fa-solid fa-flag-checkered"></i> Marcar Ruta Completada
+        </button>
+      `;
     }
 
     // Botón "Simular Recorrido" / "Detener Simulación" — su estado (corriendo o no) se
@@ -851,6 +954,24 @@ document.addEventListener('DOMContentLoaded', () => {
           d.status
         ]);
         ExportUtils.toPdf(`Documentos — ${selectedVehicleId}`, headers, rows);
+      }
+
+      const completeBtn = e.target.closest('#btn-complete-route');
+      if (completeBtn) {
+        const vehicleId = completeBtn.dataset.vehicleId;
+        completeBtn.disabled = true;
+        AuthClient.authedFetch(`/api/v1/routes/${vehicleId}/complete`, { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (!data.success) { alert(data.message || 'No se pudo marcar la ruta como completada'); return; }
+            UIComponents.showToastAlert(alertsFeed, {
+              title: 'Ruta Completada',
+              message: `${vehicleId} — combustible final registrado para el reporte`
+            });
+            if (selectedVehicleId === vehicleId) loadRouteForVehicle(vehicleId);
+          })
+          .catch(() => alert('No se pudo conectar al servidor'))
+          .finally(() => { completeBtn.disabled = false; });
       }
 
       const simBtn = e.target.closest('#btn-simulate-route');

@@ -2,6 +2,7 @@ package com.fleetpulse.driver.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,8 @@ fun DriverDashboardScreen(
     currentLongitude: Double,
     currentSpeedKmh: Float,
     pendingGpsCount: Int,
+    fuelPct: Float,
+    onUpdateFuel: (Float) -> Unit,
     assignedRoute: AssignedRoute?,
     driverCode: String?,
     onToggleDuty: (Boolean) -> Unit,
@@ -50,6 +53,14 @@ fun DriverDashboardScreen(
     var showSosDialog by remember { mutableStateOf(false) }
     var pendingAlert by remember { mutableStateOf<AlertOption?>(null) }
     var alertMessage by remember { mutableStateOf("") }
+    var showFuelDialog by remember { mutableStateOf(false) }
+    var fuelSliderValue by remember { mutableStateOf(fuelPct) }
+
+    val fuelColor = when {
+        fuelPct <= 20f -> CrimsonRed
+        fuelPct <= 50f -> Color(0xFFF59E0B)
+        else -> EmeraldGreen
+    }
 
     val statusColor by animateColorAsState(
         if (isTrackingActive) EmeraldGreen else Color.Gray,
@@ -207,6 +218,29 @@ fun DriverDashboardScreen(
                                 color = CyanAccent
                             )
                             Text(text = "km/h Velocidad", fontSize = 12.sp, color = TextMuted)
+                        }
+
+                        Divider(
+                            modifier = Modifier
+                                .height(50.dp)
+                                .width(1.dp),
+                            color = Color.White.copy(alpha = 0.1f)
+                        )
+
+                        // Fuel Gauge — reportado por el chofer (sin sensor real de combustible),
+                        // toca para corregirlo (p.ej. después de repostar a mitad de ruta).
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.clickable { fuelSliderValue = fuelPct; showFuelDialog = true }
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.LocalGasStation, contentDescription = null, tint = fuelColor)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(text = "${fuelPct.toInt()}%", fontWeight = FontWeight.Bold, color = TextWhite)
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Icon(Icons.Default.Edit, contentDescription = "Corregir nivel de combustible", tint = TextMuted, modifier = Modifier.size(14.dp))
+                            }
+                            Text(text = "Combustible", fontSize = 12.sp, color = TextMuted)
                         }
 
                         Divider(
@@ -410,6 +444,41 @@ fun DriverDashboardScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingAlert = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    // Corregir el nivel de combustible reportado — no hay sensor real, así que el
+    // chofer lo ajusta manualmente (por ejemplo, tras repostar a mitad de ruta).
+    if (showFuelDialog) {
+        AlertDialog(
+            onDismissRequest = { showFuelDialog = false },
+            title = { Text(text = "Nivel de Combustible", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(text = "Ajusta el nivel actual del tanque. Se usará para calcular el consumo de esta ruta.")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(text = "${fuelSliderValue.toInt()}%", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Slider(
+                        value = fuelSliderValue,
+                        onValueChange = { fuelSliderValue = it },
+                        valueRange = 0f..100f,
+                        steps = 19
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onUpdateFuel(fuelSliderValue)
+                    showFuelDialog = false
+                }) {
+                    Text("Guardar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFuelDialog = false }) {
                     Text("Cancelar")
                 }
             }

@@ -8,6 +8,7 @@ const fs = require('fs');
 const isPg = !!process.env.DATABASE_URL;
 
 const MAX_FREE_ACCOUNTS = 5000;
+const FULL_TANK_THRESHOLD = 95; // % fuel considered "full" when a route starts
 
 let pgPool = null;
 let sqliteDb = null;
@@ -83,7 +84,8 @@ async function setup() {
         id TEXT PRIMARY KEY,
         vehicle_id TEXT NOT NULL REFERENCES vehicles(id),
         owner_user_id INTEGER NOT NULL REFERENCES users(id),
-        stops_json TEXT NOT NULL, status TEXT DEFAULT 'active', created_at BIGINT NOT NULL
+        stops_json TEXT NOT NULL, status TEXT DEFAULT 'active', created_at BIGINT NOT NULL,
+        start_fuel REAL, full_tank BOOLEAN, end_fuel REAL, completed_at BIGINT
       );
       CREATE TABLE IF NOT EXISTS alerts (
         id TEXT PRIMARY KEY,
@@ -105,6 +107,15 @@ async function setup() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS driver_code TEXT UNIQUE;
       ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_user_id INTEGER REFERENCES users(id);
+    `);
+
+    // Migration: fuel tracking per route (start/end tank level, so consumption and
+    // "started with a full tank" can be reported once a route finishes).
+    await pgPool.query(`
+      ALTER TABLE routes ADD COLUMN IF NOT EXISTS start_fuel REAL;
+      ALTER TABLE routes ADD COLUMN IF NOT EXISTS full_tank BOOLEAN;
+      ALTER TABLE routes ADD COLUMN IF NOT EXISTS end_fuel REAL;
+      ALTER TABLE routes ADD COLUMN IF NOT EXISTS completed_at BIGINT;
     `);
     return;
   }
@@ -142,6 +153,7 @@ async function setup() {
       vehicle_id TEXT NOT NULL,
       owner_user_id INTEGER NOT NULL,
       stops_json TEXT NOT NULL, status TEXT DEFAULT 'active', created_at INTEGER NOT NULL,
+      start_fuel REAL, full_tank BOOLEAN, end_fuel REAL, completed_at INTEGER,
       FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
       FOREIGN KEY (owner_user_id) REFERENCES users(id)
     );
@@ -180,6 +192,13 @@ async function setup() {
   if (!existingUserCols.has('driver_code')) {
     sqliteDb.exec(`ALTER TABLE users ADD COLUMN driver_code TEXT`);
     sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_driver_code ON users(driver_code)`);
+  }
+
+  // Migration: fuel tracking per route, for DBs created before these columns existed.
+  const existingRouteCols = new Set(sqliteDb.prepare(`PRAGMA table_info(routes)`).all().map(c => c.name));
+  const routeColumns = { start_fuel: 'REAL', full_tank: 'BOOLEAN', end_fuel: 'REAL', completed_at: 'INTEGER' };
+  for (const [name, def] of Object.entries(routeColumns)) {
+    if (!existingRouteCols.has(name)) sqliteDb.exec(`ALTER TABLE routes ADD COLUMN ${name} ${def}`);
   }
 }
 
@@ -320,13 +339,55 @@ async function claimDriverVehicles(driverUserId, adminUserId) {
 
 async function setActiveRoute({ id, vehicleId, ownerUserId, stops }) {
   await setupPromise;
-  await query(`UPDATE routes SET status = 'replaced' WHERE vehicle_id = $1 AND status = 'active'`, [vehicleId], 'run');
+  const vehicle = await getVehicle(vehicleId);
+  const currentFuel = vehicle?.fuel ?? null;
+  const now = Date.now();
+  const isFullTank = currentFuel != null && currentFuel >= FULL_TANK_THRESHOLD;
+  // node:sqlite's binder rejects raw JS booleans ("cannot be bound to SQLite
+  // parameter") — Postgres is fine with true/false, so only SQLite needs 1/0.
+  const fullTankParam = isPg ? isFullTank : (isFullTank ? 1 : 0);
+
+  // Assigning a new route implicitly finishes whatever route was running before it —
+  // capture the tank level at that moment so its fuel consumption can be reported too.
   await query(
-    `INSERT INTO routes (id, vehicle_id, owner_user_id, stops_json, status, created_at) VALUES ($1, $2, $3, $4, 'active', $5)`,
-    [id, vehicleId, ownerUserId, JSON.stringify(stops), Date.now()],
+    `UPDATE routes SET status = 'completed', end_fuel = $1, completed_at = $2 WHERE vehicle_id = $3 AND status = 'active'`,
+    [currentFuel, now, vehicleId],
+    'run'
+  );
+  await query(
+    `INSERT INTO routes (id, vehicle_id, owner_user_id, stops_json, status, created_at, start_fuel, full_tank)
+     VALUES ($1, $2, $3, $4, 'active', $5, $6, $7)`,
+    [id, vehicleId, ownerUserId, JSON.stringify(stops), now, currentFuel, fullTankParam],
     'run'
   );
   return getActiveRoute(vehicleId);
+}
+
+// Marks the vehicle's current route as finished without assigning a replacement —
+// for the dashboard's "Marcar Ruta Completada" button, and reused when a simulated
+// route reaches its last stop on its own.
+async function completeRoute(vehicleId) {
+  await setupPromise;
+  const vehicle = await getVehicle(vehicleId);
+  const currentFuel = vehicle?.fuel ?? null;
+  await query(
+    `UPDATE routes SET status = 'completed', end_fuel = $1, completed_at = $2 WHERE vehicle_id = $3 AND status = 'active'`,
+    [currentFuel, Date.now(), vehicleId],
+    'run'
+  );
+}
+
+function toClientRoute(row) {
+  return {
+    id: row.id,
+    vehicleId: row.vehicle_id,
+    stops: JSON.parse(row.stops_json),
+    createdAt: Number(row.created_at),
+    startFuel: row.start_fuel,
+    fullTank: !!row.full_tank,
+    endFuel: row.end_fuel,
+    completedAt: row.completed_at != null ? Number(row.completed_at) : null
+  };
 }
 
 async function getActiveRoute(vehicleId) {
@@ -335,8 +396,21 @@ async function getActiveRoute(vehicleId) {
     `SELECT * FROM routes WHERE vehicle_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1`,
     [vehicleId], 'get'
   );
-  if (!row) return null;
-  return { id: row.id, vehicleId: row.vehicle_id, stops: JSON.parse(row.stops_json), createdAt: Number(row.created_at) };
+  return row ? toClientRoute(row) : null;
+}
+
+// Fuel report data: every finished route for this account, newest first, joined with
+// the vehicle's plate/name so the report doesn't need a second lookup per row.
+async function getCompletedRoutesByOwner(ownerUserId, limit = 200) {
+  await setupPromise;
+  const rows = await query(
+    `SELECT r.*, v.plate AS vehicle_plate, v.name AS vehicle_name
+     FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
+     WHERE r.owner_user_id = $1 AND r.status = 'completed'
+     ORDER BY r.completed_at DESC LIMIT $2`,
+    [ownerUserId, limit], 'all'
+  );
+  return rows.map(row => ({ ...toClientRoute(row), vehiclePlate: row.vehicle_plate, vehicleName: row.vehicle_name }));
 }
 
 async function insertAlert(alert) {
@@ -386,6 +460,8 @@ module.exports = {
   getDocumentsByVehicle,
   setActiveRoute,
   getActiveRoute,
+  completeRoute,
+  getCompletedRoutesByOwner,
   insertAlert,
   getAlertsByOwner,
   resolveAlert

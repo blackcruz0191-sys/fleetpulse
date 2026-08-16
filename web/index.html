@@ -179,6 +179,10 @@
         <span id="alerts-badge" style="display:none; position:absolute; top:-6px; right:-6px; background:var(--color-alert); color:white; border-radius:50%; width:18px; height:18px; font-size:0.65rem; align-items:center; justify-content:center;"></span>
       </button>
 
+      <button id="btn-open-fuel-report" class="btn btn-outline btn-sm">
+        <i class="fa-solid fa-gas-pump"></i> Combustible
+      </button>
+
       <button id="btn-toggle-theme" class="map-tool-btn" title="Cambiar a modo claro">
         <i class="fa-solid fa-moon"></i>
       </button>
@@ -330,6 +334,29 @@
         <button class="btn btn-outline" id="btn-export-alerts-csv"><i class="fa-solid fa-file-csv"></i> Exportar CSV</button>
         <button class="btn btn-outline" id="btn-export-alerts-pdf"><i class="fa-solid fa-file-pdf"></i> Exportar PDF</button>
         <button class="btn btn-outline" id="btn-close-alerts-log-2">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fuel Report Modal: fuel level at the start/end of every completed route -->
+  <div class="modal-overlay" id="fuel-report-modal">
+    <div class="modal-card" style="width: 640px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-gas-pump"></i> Reporte de Combustible</h3>
+        <button class="modal-close" id="btn-close-fuel-report"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">
+          Se registra el nivel de combustible al iniciar y terminar cada ruta asignada, para saber si el vehículo salió con el tanque lleno y cuánto consumió el viaje.
+        </p>
+        <div id="fuel-report-list">
+          <p style="color: var(--text-muted); font-size: 0.85rem;">Cargando...</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-export-fuel-csv"><i class="fa-solid fa-file-csv"></i> Exportar CSV</button>
+        <button class="btn btn-outline" id="btn-export-fuel-pdf"><i class="fa-solid fa-file-pdf"></i> Exportar PDF</button>
+        <button class="btn btn-outline" id="btn-close-fuel-report-2">Cerrar</button>
       </div>
     </div>
   </div>
