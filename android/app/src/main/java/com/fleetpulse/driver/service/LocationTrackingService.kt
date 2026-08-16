@@ -14,6 +14,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.fleetpulse.driver.MainActivity
+import com.fleetpulse.driver.data.LocationQueueStore
 import com.fleetpulse.driver.model.LocationPayload
 import com.fleetpulse.driver.network.FleetApiService
 import com.google.android.gms.location.*
@@ -28,6 +29,7 @@ class LocationTrackingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private lateinit var locationQueue: LocationQueueStore
 
     private var vehicleId: String = "CAM-101" // Default assigned vehicle
     private var driverName: String = "Chofer"
@@ -37,6 +39,7 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        locationQueue = LocationQueueStore(this)
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
@@ -137,19 +140,49 @@ class LocationTrackingService : Service() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
     }
 
+    // Sends a single ping; returns whether it reached the server. Network failures and
+    // HTTP errors are treated the same here — either way the point wasn't delivered.
+    private suspend fun sendOne(payload: LocationPayload): Boolean {
+        return try {
+            val apiService = FleetApiService.create()
+            val response = apiService.sendLocationUpdate(payload)
+            response.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // Drains whatever built up while offline, oldest first, so the route history on
+    // the dashboard doesn't jump around out of order. Stops at the first failure —
+    // still offline — and tries again on the next GPS tick instead of looping here.
+    private suspend fun flushQueuedLocations() {
+        while (locationQueue.size() > 0) {
+            val oldest = locationQueue.getAll().firstOrNull() ?: return
+            if (sendOne(oldest)) {
+                locationQueue.removeFirst()
+            } else {
+                return
+            }
+        }
+    }
+
     private fun postLocationToServer(payload: LocationPayload) {
         serviceScope.launch {
-            try {
-                val apiService = FleetApiService.create()
-                val response = apiService.sendLocationUpdate(payload)
-                if (response.isSuccessful) {
-                    Log.i(TAG, "GPS enviado con éxito a la API Backend: ${response.body()?.message}")
-                } else {
-                    Log.e(TAG, "Error HTTP ${response.code()}: ${response.errorBody()?.string()}")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error al enviar telemetría a la API: ${e.message}")
+            flushQueuedLocations()
+
+            val delivered = sendOne(payload)
+            if (delivered) {
+                Log.i(TAG, "GPS enviado con éxito a la API Backend")
+            } else {
+                // Sin conexión (o el servidor no respondió) — se guarda para reintentar
+                // en el siguiente tick, en vez de perder este punto de la ruta.
+                locationQueue.enqueue(payload)
+                Log.w(TAG, "Sin conexión: posición encolada (${locationQueue.size()} pendiente(s))")
             }
+
+            sendBroadcast(Intent(ACTION_QUEUE_UPDATE).apply {
+                putExtra(EXTRA_QUEUE_SIZE, locationQueue.size())
+            })
         }
     }
 
@@ -183,6 +216,7 @@ class LocationTrackingService : Service() {
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
         const val ACTION_LOCATION_UPDATE = "ACTION_LOCATION_UPDATE"
+        const val ACTION_QUEUE_UPDATE = "ACTION_QUEUE_UPDATE"
 
         const val EXTRA_VEHICLE_ID = "EXTRA_VEHICLE_ID"
         const val EXTRA_DRIVER_NAME = "EXTRA_DRIVER_NAME"
@@ -191,6 +225,7 @@ class LocationTrackingService : Service() {
         const val EXTRA_LAT = "EXTRA_LAT"
         const val EXTRA_LNG = "EXTRA_LNG"
         const val EXTRA_SPEED = "EXTRA_SPEED"
+        const val EXTRA_QUEUE_SIZE = "EXTRA_QUEUE_SIZE"
 
         private const val UPDATE_INTERVAL_MS = 3000L
         private const val FASTEST_UPDATE_INTERVAL_MS = 1500L

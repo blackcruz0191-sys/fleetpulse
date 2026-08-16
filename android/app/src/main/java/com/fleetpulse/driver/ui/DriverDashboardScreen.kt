@@ -37,6 +37,7 @@ fun DriverDashboardScreen(
     currentLatitude: Double,
     currentLongitude: Double,
     currentSpeedKmh: Float,
+    pendingGpsCount: Int,
     assignedRoute: AssignedRoute?,
     driverCode: String?,
     onToggleDuty: (Boolean) -> Unit,
@@ -152,6 +153,26 @@ fun DriverDashboardScreen(
                             uncheckedTrackColor = CardNavy
                         )
                     )
+                }
+
+                // Modo offline: se muestra solo si hay posiciones GPS sin poder enviar
+                // todavía (sin señal, zona muerta) — se sincronizan solas al volver la conexión.
+                if (pendingGpsCount > 0) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "$pendingGpsCount posición${if (pendingGpsCount == 1) "" else "es"} sin enviar · se sincronizará al recuperar señal",
+                            fontSize = 11.sp,
+                            color = Color(0xFFF59E0B)
+                        )
+                    }
                 }
             }
 

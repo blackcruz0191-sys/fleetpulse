@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
     private var currentLat by mutableStateOf(-12.046374) // Plaza Mayor de Lima (placeholder until first GPS fix)
     private var currentLng by mutableStateOf(-77.042793)
     private var currentSpeed by mutableStateOf(0f)
+    private var pendingGpsCount by mutableStateOf(0) // posiciones GPS encoladas esperando conexión
 
     private var isAuthenticated by mutableStateOf(false)
     private var isAuthLoading by mutableStateOf(false)
@@ -83,9 +84,16 @@ class MainActivity : ComponentActivity() {
     private val locationBroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent?.let {
-                currentLat = it.getDoubleExtra(LocationTrackingService.EXTRA_LAT, currentLat)
-                currentLng = it.getDoubleExtra(LocationTrackingService.EXTRA_LNG, currentLng)
-                currentSpeed = it.getFloatExtra(LocationTrackingService.EXTRA_SPEED, 0f)
+                when (it.action) {
+                    LocationTrackingService.ACTION_LOCATION_UPDATE -> {
+                        currentLat = it.getDoubleExtra(LocationTrackingService.EXTRA_LAT, currentLat)
+                        currentLng = it.getDoubleExtra(LocationTrackingService.EXTRA_LNG, currentLng)
+                        currentSpeed = it.getFloatExtra(LocationTrackingService.EXTRA_SPEED, 0f)
+                    }
+                    LocationTrackingService.ACTION_QUEUE_UPDATE -> {
+                        pendingGpsCount = it.getIntExtra(LocationTrackingService.EXTRA_QUEUE_SIZE, 0)
+                    }
+                }
             }
         }
     }
@@ -194,6 +202,7 @@ class MainActivity : ComponentActivity() {
                         currentLatitude = currentLat,
                         currentLongitude = currentLng,
                         currentSpeedKmh = currentSpeed,
+                        pendingGpsCount = pendingGpsCount,
                         assignedRoute = assignedRoute,
                         driverCode = SessionManager.driverCode,
                         onToggleDuty = { enabled ->
@@ -520,17 +529,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        val filter = IntentFilter().apply {
+            addAction(LocationTrackingService.ACTION_LOCATION_UPDATE)
+            addAction(LocationTrackingService.ACTION_QUEUE_UPDATE)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(
-                locationBroadcastReceiver,
-                IntentFilter(LocationTrackingService.ACTION_LOCATION_UPDATE),
-                RECEIVER_NOT_EXPORTED
-            )
+            registerReceiver(locationBroadcastReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
-            registerReceiver(
-                locationBroadcastReceiver,
-                IntentFilter(LocationTrackingService.ACTION_LOCATION_UPDATE)
-            )
+            registerReceiver(locationBroadcastReceiver, filter)
         }
     }
 
