@@ -207,6 +207,13 @@ fun AuthScreen(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(28.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "Camila", fontSize = 12.sp, color = TextMuted)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "❤️", fontSize = 12.sp)
+                }
             }
         }
     }
