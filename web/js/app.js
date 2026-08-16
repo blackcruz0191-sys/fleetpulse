@@ -7,6 +7,60 @@ document.addEventListener('DOMContentLoaded', () => {
   // synchronously on page load, which calls initDashboard() before this line would
   // otherwise run — referencing a `let` before its declaration throws a TDZ error.
   let dashboardInitialized = false;
+  let activeMapManager = null; // set once initDashboard() creates the map; used by the theme toggle below
+
+  // ============================================================
+  // Theme Toggle (light/dark) — lives in the always-present header, so it
+  // works both on the login screen and inside the dashboard.
+  // ============================================================
+  const btnToggleTheme = document.getElementById('btn-toggle-theme');
+  const themeIcon = btnToggleTheme.querySelector('i');
+
+  function applyTheme(theme) {
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      themeIcon.className = 'fa-solid fa-sun';
+      btnToggleTheme.title = 'Cambiar a modo oscuro';
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      themeIcon.className = 'fa-solid fa-moon';
+      btnToggleTheme.title = 'Cambiar a modo claro';
+    }
+    activeMapManager?.setBasemapTheme(theme);
+  }
+
+  // Sync the icon with whatever the early inline script in index.html already applied.
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+
+  btnToggleTheme.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    localStorage.setItem('fleetpulse_theme', next);
+    applyTheme(next);
+  });
+
+  // ============================================================
+  // Browser Push Notifications — native OS notifications for operational
+  // alerts (combustible, emergencia, avería, cambio de chofer) when the
+  // dashboard tab isn't focused, so an admin doesn't need it open to notice.
+  // ============================================================
+  function requestNotificationPermission() {
+    if (!('Notification' in window)) return; // unsupported browser — silently skip
+    if (Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }
+
+  function notifyBrowser(title, body) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!document.hidden) return; // the in-app toast already covers this case
+    try {
+      const n = new Notification(title, { body, tag: 'fleetpulse-alert' });
+      n.onclick = () => { window.focus(); n.close(); };
+    } catch (e) {
+      // Some browsers (older Firefox on Android) throw instead of using the
+      // Service Worker notification API — not worth surfacing to the user.
+    }
+  }
 
   // ============================================================
   // Auth Gate
@@ -109,6 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
       driverCodeBanner.style.display = 'block';
     }
 
+    requestNotificationPermission();
     initDashboard();
   }
 
@@ -162,6 +217,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCloseGeofenceModal = document.getElementById('btn-close-geofence-modal');
     const btnCancelGeofence = document.getElementById('btn-cancel-geofence');
     const btnSaveGeofence = document.getElementById('btn-save-geofence');
+    const geoShapeSelect = document.getElementById('geo-shape');
+    const geoRadiusGroup = document.getElementById('geo-radius-group');
+    const geoPolygonGroup = document.getElementById('geo-polygon-group');
+    const btnDrawPolygon = document.getElementById('btn-draw-polygon');
+    const geoPolygonStatus = document.getElementById('geo-polygon-status');
+    const geofenceDrawPanel = document.getElementById('geofence-draw-panel');
+    const geofenceDrawCount = document.getElementById('geofence-draw-count');
+    const btnCancelPolygon = document.getElementById('btn-cancel-polygon');
+    const btnFinishPolygon = document.getElementById('btn-finish-polygon');
+    let pendingPolygonPoints = null; // set once "Finalizar" closes the drawing panel
 
     // Map Controls DOM
     const btnCenterFleet = document.getElementById('btn-center-fleet');
@@ -172,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mapManager = new FleetMapManager('map', (vehicleId) => {
       selectVehicle(vehicleId);
     });
+    activeMapManager = mapManager;
 
     mapManager.renderGeofences(geofences);
 
@@ -277,10 +343,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('alert_created', (alert) => {
       const info = ALERT_LABELS[alert.type] || { title: alert.type, icon: 'fa-bell' };
-      UIComponents.showToastAlert(alertsFeed, {
-        title: `${info.title} — ${alert.vehicleId}`,
-        message: alert.message || 'Alerta reportada desde la app del chofer'
-      });
+      const title = `${info.title} — ${alert.vehicleId}`;
+      const message = alert.message || 'Alerta reportada desde la app del chofer';
+      UIComponents.showToastAlert(alertsFeed, { title, message });
+      notifyBrowser(title, message);
 
       openAlertCount += 1;
       updateAlertsBadge();
@@ -853,36 +919,83 @@ document.addEventListener('DOMContentLoaded', () => {
       mapManager.toggleGeofences(btnToggleGeofences.classList.contains('active'));
     });
 
-    btnAddGeofence.addEventListener('click', () => geofenceModal.classList.add('active'));
+    function updateGeoShapeFields() {
+      const isPolygon = geoShapeSelect.value === 'polygon';
+      geoRadiusGroup.style.display = isPolygon ? 'none' : 'block';
+      geoPolygonGroup.style.display = isPolygon ? 'block' : 'none';
+    }
+    geoShapeSelect.addEventListener('change', updateGeoShapeFields);
+
+    btnAddGeofence.addEventListener('click', () => {
+      pendingPolygonPoints = null;
+      geoShapeSelect.value = 'circle';
+      updateGeoShapeFields();
+      geoPolygonStatus.textContent = 'Toca el botón y luego haz clic en el mapa para marcar cada esquina de la zona.';
+      geofenceModal.classList.add('active');
+    });
     btnCloseGeofenceModal.addEventListener('click', () => geofenceModal.classList.remove('active'));
     btnCancelGeofence.addEventListener('click', () => geofenceModal.classList.remove('active'));
+
+    // Drawing a polygon hides the modal so the map is fully clickable, then
+    // reopens it once "Finalizar" closes the shape — same pattern as route stops.
+    btnDrawPolygon.addEventListener('click', () => {
+      geofenceModal.classList.remove('active');
+      geofenceDrawPanel.style.display = 'block';
+      geofenceDrawCount.textContent = '0 puntos agregados';
+      mapManager.startGeofenceDrawing((count) => {
+        geofenceDrawCount.textContent = `${count} punto${count === 1 ? '' : 's'} agregado${count === 1 ? '' : 's'}`;
+      });
+    });
+
+    function endGeofenceDrawing() {
+      mapManager.stopGeofenceDrawing();
+      geofenceDrawPanel.style.display = 'none';
+    }
+
+    btnCancelPolygon.addEventListener('click', () => {
+      endGeofenceDrawing();
+      mapManager.clearGeofenceDrawing();
+      geofenceModal.classList.add('active');
+    });
+
+    btnFinishPolygon.addEventListener('click', () => {
+      if (mapManager.geofenceDrawPoints.length < 3) {
+        alert('Marca al menos 3 puntos para formar un polígono');
+        return;
+      }
+      pendingPolygonPoints = [...mapManager.geofenceDrawPoints];
+      endGeofenceDrawing();
+      mapManager.clearGeofenceDrawing();
+      geoPolygonStatus.textContent = `Polígono listo (${pendingPolygonPoints.length} puntos). Completa el nombre y guarda.`;
+      geofenceModal.classList.add('active');
+    });
 
     btnSaveGeofence.addEventListener('click', (e) => {
       e.preventDefault();
       const name = document.getElementById('geo-name').value;
       const type = document.getElementById('geo-type').value;
+      const shape = geoShapeSelect.value;
       const radius = parseInt(document.getElementById('geo-radius').value, 10);
 
       if (!name) {
         alert('Por favor introduce un nombre para la geocerca');
         return;
       }
+      if (shape === 'polygon' && !pendingPolygonPoints) {
+        alert('Primero dibuja el polígono en el mapa con el botón de arriba');
+        return;
+      }
 
+      const color = type === 'depot' ? '#3b82f6' : (type === 'client' ? '#10b981' : '#ef4444');
       const center = mapManager.map.getCenter();
-
-      const newGeo = {
-        id: `geo-${Date.now()}`,
-        name: name,
-        type: type,
-        lat: center.lat,
-        lng: center.lng,
-        radius: radius || 300,
-        color: type === 'depot' ? '#3b82f6' : (type === 'client' ? '#10b981' : '#ef4444')
-      };
+      const newGeo = shape === 'polygon'
+        ? { id: `geo-${Date.now()}`, name, type, shape: 'polygon', points: pendingPolygonPoints, color }
+        : { id: `geo-${Date.now()}`, name, type, shape: 'circle', lat: center.lat, lng: center.lng, radius: radius || 300, color };
 
       geofences.push(newGeo);
       mapManager.renderGeofences(geofences);
       geofenceModal.classList.remove('active');
+      pendingPolygonPoints = null;
 
       UIComponents.showToastAlert(alertsFeed, {
         title: 'Geocerca Creada',

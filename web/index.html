@@ -4,7 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FleetPulse - Centro de Control y Seguimiento de Flotas</title>
-  
+
+  <!-- Applies the saved theme before any CSS/paint happens, so there's no flash of
+       the wrong theme on load. Defaults to dark (the app's original look). -->
+  <script>
+    (function () {
+      var saved = localStorage.getItem('fleetpulse_theme');
+      if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    })();
+  </script>
+
   <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -168,6 +177,10 @@
       <button id="btn-open-alerts-log" class="btn btn-outline btn-sm" style="position: relative;">
         <i class="fa-solid fa-bell"></i> Alertas
         <span id="alerts-badge" style="display:none; position:absolute; top:-6px; right:-6px; background:var(--color-alert); color:white; border-radius:50%; width:18px; height:18px; font-size:0.65rem; align-items:center; justify-content:center;"></span>
+      </button>
+
+      <button id="btn-toggle-theme" class="map-tool-btn" title="Cambiar a modo claro">
+        <i class="fa-solid fa-moon"></i>
       </button>
 
       <div class="user-chip" id="user-chip">
@@ -468,7 +481,7 @@
             <label for="geo-name">Nombre de la Zona / Parada</label>
             <input type="text" id="geo-name" placeholder="Ej: Centro de Distribución Norte" required />
           </div>
-          
+
           <div class="form-row">
             <div class="form-group">
               <label for="geo-type">Tipo de Zona</label>
@@ -480,9 +493,29 @@
               </select>
             </div>
             <div class="form-group">
-              <label for="geo-radius">Radio de Alerta (metros)</label>
-              <input type="number" id="geo-radius" value="300" min="50" max="2000" step="50" />
+              <label for="geo-shape">Forma</label>
+              <select id="geo-shape">
+                <option value="circle">Círculo</option>
+                <option value="polygon">Polígono (dibujado a mano)</option>
+              </select>
             </div>
+          </div>
+
+          <div class="form-group" id="geo-radius-group">
+            <label for="geo-radius">Radio de Alerta (metros)</label>
+            <input type="number" id="geo-radius" value="300" min="50" max="2000" step="50" />
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+              El círculo se centra en el punto donde está el mapa ahora mismo.
+            </p>
+          </div>
+
+          <div class="form-group" id="geo-polygon-group" style="display: none;">
+            <button type="button" class="btn btn-outline" id="btn-draw-polygon" style="width: 100%;">
+              <i class="fa-solid fa-draw-polygon"></i> Dibujar Polígono en el Mapa
+            </button>
+            <p id="geo-polygon-status" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+              Toca el botón y luego haz clic en el mapa para marcar cada esquina de la zona.
+            </p>
           </div>
 
           <div class="form-group">
@@ -498,6 +531,17 @@
         <button class="btn btn-outline" id="btn-cancel-geofence">Cancelar</button>
         <button class="btn btn-primary" id="btn-save-geofence">Guardar y Activar Zona</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Floating panel shown over the map while tracing a geofence polygon by hand -->
+  <div class="route-panel" id="geofence-draw-panel" style="display: none;">
+    <h4>Dibujando Polígono</h4>
+    <p>Haz clic en el mapa para agregar cada esquina de la zona (mínimo 3 puntos).</p>
+    <p id="geofence-draw-count" style="font-size: 0.8rem; color: var(--text-muted);">0 puntos agregados</p>
+    <div style="display: flex; gap: 8px; margin-top: 10px;">
+      <button class="btn btn-outline btn-sm" id="btn-cancel-polygon" style="flex: 1;">Cancelar</button>
+      <button class="btn btn-primary btn-sm" id="btn-finish-polygon" style="flex: 1;">Finalizar</button>
     </div>
   </div>
 

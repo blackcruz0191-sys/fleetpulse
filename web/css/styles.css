@@ -35,6 +35,26 @@
   --accent-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #8b5cf6 100%);
 }
 
+/* ==========================================================================
+   Light Theme — same variable names, so every rule that already uses
+   var(--bg-dark), var(--text-main), etc. adapts automatically. Status colors
+   (active/idle/alert/offline) and the brand accent stay identical in both
+   themes on purpose — they're meaning-coded, not decorative.
+   ========================================================================== */
+:root[data-theme="light"] {
+  --bg-dark: #eef1f6;
+  --bg-card: rgba(255, 255, 255, 0.85);
+  --bg-card-hover: rgba(241, 245, 249, 0.95);
+  --bg-sidebar: rgba(255, 255, 255, 0.94);
+  --bg-glass: rgba(15, 23, 42, 0.03);
+  --border-color: rgba(15, 23, 42, 0.1);
+  --border-glow: rgba(6, 182, 212, 0.35);
+
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --text-dim: #64748b;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -505,9 +525,14 @@ body {
   background: var(--bg-dark);
 }
 
-/* Dark Map Overrides */
+/* Map background while tiles load — matches the CartoDB basemap swapped in by
+   FleetMapManager.setBasemapTheme() (dark_all / light_all) for each theme. */
 .leaflet-container {
   background: #090d16 !important;
+}
+
+:root[data-theme="light"] .leaflet-container {
+  background: #e5e7eb !important;
 }
 
 .map-overlay-controls {

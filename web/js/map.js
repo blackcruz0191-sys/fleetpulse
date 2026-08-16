@@ -17,6 +17,11 @@ class FleetMapManager {
     this.stopMarkers = [];
     this.routeLine = null;
 
+    this.geofencePickingCallback = null;
+    this.geofenceDrawPoints = [];
+    this.geofenceDrawMarkers = [];
+    this.geofenceDrawPreview = null;
+
     this.initMap();
   }
 
@@ -28,8 +33,11 @@ class FleetMapManager {
       zoomControl: false
     });
 
-    // Dark Matter CartoDB Basemap Tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    // CartoDB Basemap Tiles — starts on whichever theme is already active (set
+    // synchronously before this script runs, see the inline snippet in index.html)
+    // so the map never flashes the wrong basemap on load.
+    const initialBasemap = document.documentElement.getAttribute('data-theme') === 'light' ? 'light_all' : 'dark_all';
+    this.tileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${initialBasemap}/{z}/{x}/{y}{r}.png`, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 19
@@ -42,7 +50,66 @@ class FleetMapManager {
       if (this.stopPickingCallback) {
         this.stopPickingCallback(e.latlng.lat, e.latlng.lng);
       }
+      if (this.geofencePickingCallback) {
+        this.geofencePickingCallback(e.latlng.lat, e.latlng.lng);
+      }
     });
+  }
+
+  // ------------------------------------------------------------
+  // Geofence polygon drawing: click-to-add-corner, with a live preview
+  // outline so the admin can see the shape forming before finishing it.
+  // ------------------------------------------------------------
+
+  startGeofenceDrawing(onPointAdded) {
+    this.geofenceDrawPoints = [];
+    this.clearGeofenceDrawing();
+    this.geofencePickingCallback = (lat, lng) => {
+      this.geofenceDrawPoints.push([lat, lng]);
+      const marker = L.circleMarker([lat, lng], {
+        radius: 6, color: '#fff', weight: 2, fillColor: '#3b82f6', fillOpacity: 1
+      }).addTo(this.map);
+      this.geofenceDrawMarkers.push(marker);
+
+      if (this.geofenceDrawPreview) this.map.removeLayer(this.geofenceDrawPreview);
+      if (this.geofenceDrawPoints.length >= 2) {
+        this.geofenceDrawPreview = L.polygon(this.geofenceDrawPoints, {
+          color: '#3b82f6', fillOpacity: 0.15, dashArray: '4, 6'
+        }).addTo(this.map);
+      }
+
+      onPointAdded(this.geofenceDrawPoints.length);
+    };
+    const container = this.map.getContainer();
+    if (container) container.style.cursor = 'crosshair';
+  }
+
+  stopGeofenceDrawing() {
+    this.geofencePickingCallback = null;
+    const container = this.map.getContainer();
+    if (container) container.style.cursor = '';
+  }
+
+  clearGeofenceDrawing() {
+    this.geofenceDrawMarkers.forEach(m => this.map.removeLayer(m));
+    this.geofenceDrawMarkers = [];
+    if (this.geofenceDrawPreview) {
+      this.map.removeLayer(this.geofenceDrawPreview);
+      this.geofenceDrawPreview = null;
+    }
+    this.geofenceDrawPoints = [];
+  }
+
+  // Swaps the CartoDB basemap between its dark and light variants when the user
+  // toggles the dashboard theme, so the map matches the rest of the UI.
+  setBasemapTheme(theme) {
+    const variant = theme === 'light' ? 'light_all' : 'dark_all';
+    this.map.removeLayer(this.tileLayer);
+    this.tileLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${variant}/{z}/{x}/{y}{r}.png`, {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19
+    }).addTo(this.map);
   }
 
   // ------------------------------------------------------------
@@ -210,23 +277,32 @@ class FleetMapManager {
     if (!this.showGeofences) return;
 
     geofences.forEach(geo => {
-      const circle = L.circle([geo.lat, geo.lng], {
+      const style = {
         color: geo.color || '#3b82f6',
         fillColor: geo.color || '#3b82f6',
         fillOpacity: 0.15,
-        radius: geo.radius,
         weight: 2,
         dashArray: '4, 6'
-      });
+      };
 
-      circle.bindTooltip(`<b>${geo.name}</b><br>Radio: ${geo.radius}m`, {
+      let layer;
+      let tooltip;
+      if (geo.shape === 'polygon' && Array.isArray(geo.points)) {
+        layer = L.polygon(geo.points, style);
+        tooltip = `<b>${geo.name}</b><br>Polígono (${geo.points.length} puntos)`;
+      } else {
+        layer = L.circle([geo.lat, geo.lng], { ...style, radius: geo.radius });
+        tooltip = `<b>${geo.name}</b><br>Radio: ${geo.radius}m`;
+      }
+
+      layer.bindTooltip(tooltip, {
         permanent: false,
         direction: 'top',
         className: 'custom-leaflet-popup'
       });
 
-      circle.addTo(this.map);
-      this.geofenceLayers.set(geo.id, circle);
+      layer.addTo(this.map);
+      this.geofenceLayers.set(geo.id, layer);
     });
   }
 
